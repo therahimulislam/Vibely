@@ -14,6 +14,8 @@ export default function MessageInput({ chatId, recipientId }) {
     const [mediaType, setMediaType] = useState('text'); // 'image', 'video', 'document'
     const [isSending, setIsSending] = useState(false);
     const [showEmoji, setShowEmoji] = useState(false);
+    const [showAttach, setShowAttach] = useState(false);
+    const [isDocument, setIsDocument] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(0);
     const inputRef = useRef(null);
     const fileInputRef = useRef(null);
@@ -49,16 +51,24 @@ export default function MessageInput({ chatId, recipientId }) {
 
         setMedia(file);
 
-        if (file.type.startsWith('image/')) {
-            setMediaType('image');
-            setMediaPreview(URL.createObjectURL(file));
-        } else if (file.type.startsWith('video/')) {
-            setMediaType('video');
-            setMediaPreview(URL.createObjectURL(file));
-        } else {
+        if (isDocument) {
             setMediaType('document');
             setMediaPreview(file.name);
+        } else {
+            // Gallery mode (auto-detect)
+            if (file.type.startsWith('image/')) {
+                setMediaType('image');
+                setMediaPreview(URL.createObjectURL(file));
+            } else if (file.type.startsWith('video/')) {
+                setMediaType('video');
+                setMediaPreview(URL.createObjectURL(file));
+            } else {
+                // Fallback for non-image/video in gallery mode (should generally be filtered out by accept, but safety)
+                setMediaType('document');
+                setMediaPreview(file.name);
+            }
         }
+        setShowAttach(false);
     };
 
     const handleSend = async () => {
@@ -74,6 +84,7 @@ export default function MessageInput({ chatId, recipientId }) {
                 formData.append('chatId', chatId);
                 formData.append('text', text.trim());
                 formData.append('media', media);
+                formData.append('type', mediaType === 'document' ? 'document' : 'auto');
 
                 await api.post('/messages/send', formData, {
                     headers: { 'Content-Type': 'multipart/form-data' },
@@ -194,14 +205,42 @@ export default function MessageInput({ chatId, recipientId }) {
                     <Smile className="w-5 h-5 opacity-50" />
                 </button>
 
-                {/* Media upload */}
-                <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="p-2.5 rounded-xl hover:bg-white/5 transition-colors flex-shrink-0 relative group"
-                    title="Attach file (Image, Video, Document)"
-                >
-                    <Paperclip className="w-5 h-5 opacity-50 group-hover:opacity-100 transition-opacity" />
-                </button>
+                {/* Attach Menu */}
+                <div className="relative">
+                    {showAttach && (
+                        <div className="absolute bottom-full mb-2 left-0 glass-card p-2 min-w-[140px] flex flex-col gap-1 z-20 animate-slide-up">
+                            <button
+                                onClick={() => {
+                                    setIsDocument(false);
+                                    if (fileInputRef.current) fileInputRef.current.accept = "image/*,video/*";
+                                    fileInputRef.current?.click();
+                                }}
+                                className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/10 text-sm transition-colors text-left"
+                            >
+                                <Image className="w-4 h-4 text-purple-400" />
+                                <span>Gallery</span>
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setIsDocument(true);
+                                    if (fileInputRef.current) fileInputRef.current.accept = "*";
+                                    fileInputRef.current?.click();
+                                }}
+                                className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/10 text-sm transition-colors text-left"
+                            >
+                                <FileText className="w-4 h-4 text-blue-400" />
+                                <span>Document</span>
+                            </button>
+                        </div>
+                    )}
+                    <button
+                        onClick={() => setShowAttach(!showAttach)}
+                        className={`p-2.5 rounded-xl transition-colors flex-shrink-0 ${showAttach ? 'bg-primary-500/20 text-primary-400' : 'hover:bg-white/5'}`}
+                        title="Attach file"
+                    >
+                        <Paperclip className="w-5 h-5 opacity-50" />
+                    </button>
+                </div>
                 <input
                     ref={fileInputRef}
                     type="file"

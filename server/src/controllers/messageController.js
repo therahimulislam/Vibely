@@ -78,7 +78,10 @@ exports.sendMessage = async (req, res) => {
         };
 
         if (req.file) {
-            const result = await uploadFile(req.file.path);
+            const isDocumentMode = req.body.type === 'document';
+            const resourceType = isDocumentMode ? 'raw' : 'auto';
+
+            const result = await uploadFile(req.file.path, 'vibely/messages', resourceType);
 
             fileData = {
                 fileUrl: result.url,
@@ -89,11 +92,12 @@ exports.sendMessage = async (req, res) => {
             };
 
             // Determine specific type based on Cloudinary resource_type or mimetype
-            if (result.resource_type === 'image' || req.file.mimetype.startsWith('image/')) {
+            if (!isDocumentMode && (result.resource_type === 'image' || req.file.mimetype.startsWith('image/'))) {
                 fileData.type = 'image';
-            } else if (result.resource_type === 'video' || req.file.mimetype.startsWith('video/')) {
+            } else if (!isDocumentMode && (result.resource_type === 'video' || req.file.mimetype.startsWith('video/'))) {
                 fileData.type = 'video';
             }
+            // If isDocumentMode is true, it stays 'document' (default)
 
             // Cleanup
             fs.unlink(req.file.path, () => { });

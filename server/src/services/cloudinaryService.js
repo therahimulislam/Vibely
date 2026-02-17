@@ -3,7 +3,7 @@
 
 const { cloudinary } = require('../config/cloudinary');
 
-const uploadFile = async (filePath, folder = 'vibely/messages') => {
+const uploadFile = async (filePath, folder = 'vibely/messages', resourceType = 'auto') => {
     try {
         // Determine resource type
         // Just upload as 'auto' and let Cloudinary decide, or inspect file extension?
@@ -13,7 +13,7 @@ const uploadFile = async (filePath, folder = 'vibely/messages') => {
 
         const result = await cloudinary.uploader.upload(filePath, {
             folder,
-            resource_type: 'auto', // Detects image/video/raw
+            resource_type: resourceType, // Detects image/video/raw OR uses explicit type
             // Transformations mainly apply to images/videos
             transformation: [
                 { quality: 'auto', fetch_format: 'auto' }, // Compression
