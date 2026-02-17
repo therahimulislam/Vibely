@@ -16,7 +16,9 @@ export default function ChatList() {
             if (chat.isGroup) {
                 return chat.groupName.toLowerCase().includes(searchQuery.toLowerCase());
             }
-            return chat.participants.some(
+            // Filter nulls first
+            const validParticipants = (chat.participants || []).filter(p => p);
+            return validParticipants.some(
                 (p) =>
                     p._id !== user._id &&
                     (p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -71,7 +73,8 @@ export default function ChatList() {
                     };
                     // Optional: show online if any member is online? For now false
                 } else {
-                    displayUser = chat.participants.find((p) => p._id !== user._id);
+                    const validParticipants = (chat.participants || []).filter(p => p);
+                    displayUser = validParticipants.find((p) => p._id !== user._id);
                     if (!displayUser) return null;
                     isOnline = onlineUsers.has(displayUser._id);
                 }

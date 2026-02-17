@@ -26,7 +26,8 @@ export default function MessageArea({ onBack, onProfileClick }) {
     // Defensive check
     if (!user || !activeChat) return null;
 
-    const participants = activeChat?.participants || [];
+    // Filter out null participants (e.g. deleted users)
+    const participants = (activeChat?.participants || []).filter(p => p);
     const otherUser = participants.find((p) => p._id !== user._id);
 
     const chatInfo = activeChat?.isGroup ? {
