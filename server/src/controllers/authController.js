@@ -27,10 +27,10 @@ exports.sendOTP = async (req, res) => {
 // POST /api/auth/verify-otp
 exports.verifyOTP = async (req, res) => {
     try {
-        const { email, otp } = req.body;
+        const { email, otp, deviceId, deviceInfo } = req.body;
         const ip = req.ip;
         const userAgent = req.headers['user-agent'];
-        const result = await authService.verifyOTP(email, otp, ip, userAgent);
+        const result = await authService.verifyOTP(email, otp, ip, userAgent, deviceId, deviceInfo);
         res.json(result);
     } catch (error) {
         res.status(error.statusCode || 500).json({ error: error.message });
@@ -40,10 +40,10 @@ exports.verifyOTP = async (req, res) => {
 // POST /api/auth/login
 exports.login = async (req, res) => {
     try {
-        const { email, password } = req.body;
+        const { email, password, deviceId, deviceInfo } = req.body;
         const ip = req.ip;
         const userAgent = req.headers['user-agent'];
-        const result = await authService.login(email, password, ip, userAgent);
+        const result = await authService.login(email, password, ip, userAgent, deviceId, deviceInfo);
         res.json(result);
     } catch (error) {
         const response = { error: error.message };
@@ -55,10 +55,10 @@ exports.login = async (req, res) => {
 // POST /api/auth/google
 exports.googleAuth = async (req, res) => {
     try {
-        const { credential } = req.body;
+        const { credential, deviceId, deviceInfo } = req.body;
         const ip = req.ip;
         const userAgent = req.headers['user-agent'];
-        const result = await authService.googleAuth(credential, ip, userAgent);
+        const result = await authService.googleAuth(credential, ip, userAgent, deviceId, deviceInfo);
         res.json(result);
     } catch (error) {
         res.status(error.statusCode || 500).json({ error: error.message });

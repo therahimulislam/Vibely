@@ -1,8 +1,6 @@
-// client/src/store/useAuthStore.js
-// Authentication state management with Zustand
-
 import { create } from 'zustand';
 import api from '../api/axios';
+import { getDeviceId, getDeviceInfo } from '../utils/deviceUtils';
 
 const useAuthStore = create((set, get) => ({
     user: null,
