@@ -1,6 +1,7 @@
 // client/src/components/layout/Sidebar.jsx
 // Left sidebar with header, search, chat list, and new chat
 
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, Plus, Settings, LogOut, Sun, Moon, MessageCircle, X, Users, UserPlus, Check } from 'lucide-react';
 import useAuthStore from '../../store/useAuthStore';
