@@ -1,0 +1,69 @@
+// client/src/pages/Chat.jsx
+// Main chat page with sidebar + message area layout
+
+import { useEffect, useState } from 'react';
+import useChatStore from '../store/useChatStore';
+import Sidebar from '../components/layout/Sidebar';
+import MessageArea from '../components/chat/MessageArea';
+import UserProfile from '../components/user/UserProfile';
+import { MessageCircle } from 'lucide-react';
+
+export default function Chat() {
+    const { fetchChats, activeChat } = useChatStore();
+    const [showProfile, setShowProfile] = useState(false);
+    const [showSidebar, setShowSidebar] = useState(true);
+
+    useEffect(() => {
+        fetchChats();
+    }, []);
+
+    // On mobile, hide sidebar when chat is active
+    useEffect(() => {
+        if (activeChat && window.innerWidth < 768) {
+            setShowSidebar(false);
+        }
+    }, [activeChat]);
+
+    const handleBack = () => {
+        setShowSidebar(true);
+        useChatStore.getState().setActiveChat(null);
+    };
+
+    return (
+        <div className="h-screen flex overflow-hidden">
+            {/* Sidebar */}
+            <div className={`${showSidebar ? 'flex' : 'hidden'} md:flex w-full md:w-[380px] lg:w-[420px] flex-shrink-0`}>
+                <Sidebar onProfileClick={() => setShowProfile(true)} />
+            </div>
+
+            {/* Main Chat Area */}
+            <div className={`${!showSidebar || activeChat ? 'flex' : 'hidden'} md:flex flex-1 flex-col min-w-0`}>
+                {activeChat ? (
+                    <MessageArea
+                        onBack={handleBack}
+                        onProfileClick={() => setShowProfile(true)}
+                    />
+                ) : (
+                    // Empty state
+                    <div className="flex-1 flex items-center justify-center">
+                        <div className="text-center animate-fade-in">
+                            <div className="w-24 h-24 mx-auto mb-6 rounded-3xl flex items-center justify-center animate-float"
+                                style={{ background: 'var(--gradient-primary)', opacity: 0.8 }}>
+                                <MessageCircle className="w-12 h-12 text-white" />
+                            </div>
+                            <h2 className="text-2xl font-bold mb-2 opacity-80">Vibely Messenger</h2>
+                            <p className="opacity-40 text-sm max-w-xs mx-auto">
+                                Select a conversation or start a new chat to begin messaging
+                            </p>
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            {/* User Profile Drawer */}
+            {showProfile && (
+                <UserProfile onClose={() => setShowProfile(false)} />
+            )}
+        </div>
+    );
+}
