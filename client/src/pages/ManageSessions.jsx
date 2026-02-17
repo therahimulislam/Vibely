@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import useAuthStore from '../store/useAuthStore';
-import { Laptop, Smartphone, Globe, Clock, Trash2, Shield, AlertTriangle } from 'lucide-react';
+import { Smartphone, Monitor, X, Shield, Clock, MapPin } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { formatDistanceToNow } from 'date-fns';
+import { format } from 'date-fns';
 
 const ManageSessions = () => {
     const { getSessions, revokeSession, revokeAllOtherSessions } = useAuthStore();
@@ -48,11 +48,14 @@ const ManageSessions = () => {
         }
     };
 
-    const getDeviceIcon = (deviceType) => {
-        if (deviceType?.toLowerCase().includes('mobile') || deviceType?.toLowerCase().includes('phone') || deviceType?.toLowerCase().includes('android') || deviceType?.toLowerCase().includes('ios')) {
-            return <Smartphone className="w-6 h-6 text-blue-400" />;
+    const getDeviceIcon = (deviceType, os) => {
+        const type = deviceType?.toLowerCase() || '';
+        const osName = os?.toLowerCase() || '';
+
+        if (type.includes('mobile') || type.includes('phone') || osName.includes('android') || osName.includes('ios')) {
+            return <Smartphone className="w-6 h-6 text-white" />;
         }
-        return <Laptop className="w-6 h-6 text-purple-400" />;
+        return <Monitor className="w-6 h-6 text-white" />;
     };
 
     if (isLoading) {
@@ -64,60 +67,43 @@ const ManageSessions = () => {
     }
 
     return (
-        <div className="max-w-4xl mx-auto p-6 space-y-6">
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-2xl font-bold text-white mb-1">Active Sessions</h1>
-                    <p className="text-slate-400 text-sm">Manage your active devices and sessions</p>
-                </div>
-                {sessions.length > 1 && (
-                    <button
-                        onClick={handleRevokeAllOthers}
-                        className="flex items-center gap-2 px-4 py-2 bg-red-500/10 text-red-400 hover:bg-red-500/20 rounded-lg transition-colors text-sm font-medium border border-red-500/20"
-                    >
-                        <Shield className="w-4 h-4" />
-                        Revoke All Others
-                    </button>
-                )}
-            </div>
+        <div className="max-w-3xl mx-auto p-6 space-y-8">
+            <div>
+                <h1 className="text-xl font-bold text-white mb-6 tracking-wide">ACTIVE DEVICES</h1>
 
-            <div className="space-y-4">
-                {sessions.map((session) => (
-                    <div
-                        key={session._id}
-                        className={`relative p-5 rounded-xl border transition-all ${session.isCurrent
-                                ? 'bg-indigo-500/5 border-indigo-500/30 shadow-[0_0_15px_-3px_rgba(99,102,241,0.1)]'
-                                : 'bg-slate-800/40 border-slate-700/50 hover:bg-slate-800/60'
-                            }`}
-                    >
-                        <div className="flex items-start justify-between gap-4">
-                            <div className="flex gap-4">
-                                <div className={`p-3 rounded-xl h-fit ${session.isCurrent ? 'bg-indigo-500/10' : 'bg-slate-700/30'
-                                    }`}>
-                                    {getDeviceIcon(session.device || session.os)}
+                <div className="space-y-4">
+                    {sessions.map((session) => (
+                        <div
+                            key={session._id}
+                            className="bg-[#1e1e24] rounded-2xl p-4 flex items-center justify-between group border border-white/5 hover:border-white/10 transition-all"
+                        >
+                            <div className="flex items-center gap-4">
+                                <div className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center flex-shrink-0">
+                                    {getDeviceIcon(session.device, session.os)}
                                 </div>
-                                <div className="space-y-1">
-                                    <div className="flex items-center gap-3">
-                                        <h3 className="font-semibold text-white text-lg">
-                                            {session.browser} <span className="text-slate-500 font-normal">on</span> {session.os}
-                                        </h3>
+
+                                <div>
+                                    <h3 className="font-medium text-white text-base flex items-center gap-3">
+                                        {session.os || 'Unknown OS'}
                                         {session.isCurrent && (
-                                            <span className="px-2.5 py-0.5 text-xs font-semibold bg-indigo-500/20 text-indigo-300 rounded-full border border-indigo-500/20 shadow-sm">
-                                                Current Device
-                                            </span>
+                                            <div className="flex items-center gap-1.5 bg-[#2ecc71]/20 px-2 py-0.5 rounded text-[10px] font-bold text-[#2ecc71] uppercase tracking-wider">
+                                                <div className="w-1.5 h-1.5 rounded-full bg-[#2ecc71]"></div>
+                                                This device
+                                            </div>
                                         )}
-                                    </div>
-                                    <div className="flex flex-col gap-1 text-sm text-slate-400">
-                                        <div className="flex items-center gap-2">
-                                            <Globe className="w-4 h-4 text-slate-500" />
+                                    </h3>
+                                    <div className="text-sm text-gray-400 mt-0.5 flex flex-col gap-0.5">
+                                        <div className="flex items-center gap-1.5">
+                                            <span>{session.browser}</span>
+                                            <span className="text-gray-600">•</span>
                                             <span>{session.location && session.location !== 'Unknown' ? session.location : 'Unknown Location'}</span>
                                         </div>
-                                        <div className="flex items-center gap-2">
-                                            <Clock className="w-4 h-4 text-slate-500" />
-                                            <span>{session.isCurrent ? 'Active now' : `Last active ${formatDistanceToNow(new Date(session.lastActive), { addSuffix: true })}`}</span>
-                                        </div>
-                                        <div className="text-xs font-mono text-slate-600 pt-1">
-                                            IP: {session.ip}
+                                        <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                                            {session.isCurrent ? (
+                                                <span className="text-[#2ecc71]">Active now</span>
+                                            ) : (
+                                                <span>Last active {format(new Date(session.lastActive), 'MMM dd, hh:mm a')}</span>
+                                            )}
                                         </div>
                                     </div>
                                 </div>
@@ -126,23 +112,25 @@ const ManageSessions = () => {
                             {!session.isCurrent && (
                                 <button
                                     onClick={() => handleRevoke(session._id)}
-                                    className="p-2.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                                    className="p-2 text-gray-500 hover:text-white hover:bg-white/10 rounded-full transition-colors"
                                     title="Revoke session"
                                 >
-                                    <Trash2 className="w-5 h-5" />
+                                    <X className="w-5 h-5" />
                                 </button>
                             )}
                         </div>
-                    </div>
-                ))}
-
-                {sessions.length === 0 && !isLoading && (
-                    <div className="text-center py-12 text-slate-500 bg-slate-800/20 rounded-xl border border-dashed border-slate-700">
-                        <AlertTriangle className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                        <p>No active sessions found.</p>
-                    </div>
-                )}
+                    ))}
+                </div>
             </div>
+
+            {sessions.length > 1 && (
+                <button
+                    onClick={handleRevokeAllOthers}
+                    className="w-full py-4 border border-red-500/50 text-red-500 rounded-xl hover:bg-red-500/10 transition-colors font-medium flex items-center justify-center gap-2"
+                >
+                    Logout from all other devices
+                </button>
+            )}
         </div>
     );
 };

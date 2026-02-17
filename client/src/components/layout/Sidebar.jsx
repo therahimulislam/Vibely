@@ -1,7 +1,7 @@
 // client/src/components/layout/Sidebar.jsx
 // Left sidebar with header, search, chat list, and new chat
 
-import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Search, Plus, Settings, LogOut, Sun, Moon, MessageCircle, X, Users, UserPlus, Check } from 'lucide-react';
 import useAuthStore from '../../store/useAuthStore';
 import useChatStore from '../../store/useChatStore';
@@ -11,6 +11,7 @@ import api from '../../api/axios';
 import toast from 'react-hot-toast';
 
 export default function Sidebar({ onProfileClick }) {
+    const navigate = useNavigate();
     const { user, logout } = useAuthStore();
     const { searchQuery, setSearchQuery, createChat, fetchChats } = useChatStore();
     const [showNewChat, setShowNewChat] = useState(false);
@@ -114,6 +115,13 @@ export default function Sidebar({ onProfileClick }) {
                 </div>
 
                 <div className="flex items-center gap-1">
+                    <button
+                        onClick={() => navigate('/settings/sessions')}
+                        className="p-2 rounded-xl hover:bg-white/5 transition-colors"
+                        title="Settings"
+                    >
+                        <Settings className="w-5 h-5 opacity-50" />
+                    </button>
                     <button
                         onClick={() => window.__toggleTheme?.()}
                         className="p-2 rounded-xl hover:bg-white/5 transition-colors"
