@@ -44,7 +44,52 @@ const createSession = async (user, refreshToken, ip, userAgent, clientDeviceInfo
     await user.save();
 };
 
-// ...
+// Generate 6-digit OTP
+const generateOTP = () => {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+};
+
+// Register a new user
+const signup = async ({ name, email, password }) => {
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+        throw Object.assign(new Error('Email already registered'), { statusCode: 400 });
+    }
+
+    const otp = generateOTP();
+    const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+    const user = await User.create({
+        name,
+        email,
+        password,
+        otp,
+        otpExpiry,
+        isVerified: false,
+    });
+
+    // Send OTP email
+    await sendOTPEmail(email, otp);
+
+    return { message: 'Account created. Please verify your email with the OTP sent.', userId: user._id };
+};
+
+// Send OTP to existing user
+const sendOTP = async (email) => {
+    const user = await User.findOne({ email }).select('+otp +otpExpiry');
+    if (!user) {
+        throw Object.assign(new Error('User not found'), { statusCode: 404 });
+    }
+
+    const otp = generateOTP();
+    user.otp = otp;
+    user.otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
+    await user.save();
+
+    await sendOTPEmail(email, otp);
+
+    return { message: 'OTP sent to your email' };
+};
 
 // Verify OTP
 const verifyOTP = async (email, otp, ip, userAgent, deviceId, deviceInfo) => {
