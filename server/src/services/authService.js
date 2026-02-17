@@ -5,8 +5,30 @@ const User = require('../models/User');
 const { generateAccessToken, generateRefreshToken, verifyRefreshToken } = require('./tokenService');
 const { sendOTPEmail } = require('./emailService');
 const { OAuth2Client } = require('google-auth-library');
+const UAParser = require('ua-parser-js');
+const geoip = require('geoip-lite');
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
+// Helper: Create and add session
+const createSession = async (user, refreshToken, ip, userAgent) => {
+    const parser = new UAParser(userAgent);
+    const result = parser.getResult();
+    const geo = geoip.lookup(ip);
+
+    const session = {
+        refreshToken,
+        browser: `${result.browser.name || 'Unknown'} ${result.browser.version || ''}`.trim(),
+        os: `${result.os.name || 'Unknown'} ${result.os.version || ''}`.trim(),
+        device: result.device.model ? `${result.device.vendor || ''} ${result.device.model}`.trim() : 'Desktop',
+        ip: ip || 'Unknown',
+        location: geo ? `${geo.city || ''}, ${geo.country || ''}`.trim() : 'Unknown',
+        lastActive: new Date(),
+    };
+
+    user.sessions.push(session);
+    await user.save();
+};
 
 // Generate 6-digit OTP
 const generateOTP = () => {
@@ -56,8 +78,8 @@ const sendOTP = async (email) => {
 };
 
 // Verify OTP
-const verifyOTP = async (email, otp) => {
-    const user = await User.findOne({ email }).select('+otp +otpExpiry');
+const verifyOTP = async (email, otp, ip, userAgent) => {
+    const user = await User.findOne({ email }).select('+otp +otpExpiry +sessions');
     if (!user) {
         throw Object.assign(new Error('User not found'), { statusCode: 404 });
     }
@@ -78,15 +100,14 @@ const verifyOTP = async (email, otp) => {
     const accessToken = generateAccessToken(user._id);
     const refreshToken = generateRefreshToken(user._id);
 
-    user.refreshToken = refreshToken;
-    await user.save();
+    await createSession(user, refreshToken, ip, userAgent);
 
     return { user: user.toJSON(), accessToken, refreshToken };
 };
 
 // Login with email and password
-const login = async (email, password) => {
-    const user = await User.findOne({ email }).select('+password');
+const login = async (email, password, ip, userAgent) => {
+    const user = await User.findOne({ email }).select('+password +sessions');
     if (!user) {
         throw Object.assign(new Error('Invalid credentials'), { statusCode: 401 });
     }
@@ -113,14 +134,13 @@ const login = async (email, password) => {
     const accessToken = generateAccessToken(user._id);
     const refreshToken = generateRefreshToken(user._id);
 
-    user.refreshToken = refreshToken;
-    await user.save();
+    await createSession(user, refreshToken, ip, userAgent);
 
     return { user: user.toJSON(), accessToken, refreshToken };
 };
 
 // Google OAuth
-const googleAuth = async (credential) => {
+const googleAuth = async (credential, ip, userAgent) => {
     const ticket = await googleClient.verifyIdToken({
         idToken: credential,
         audience: process.env.GOOGLE_CLIENT_ID,
@@ -128,7 +148,7 @@ const googleAuth = async (credential) => {
 
     const { sub: googleId, name, email, picture } = ticket.getPayload();
 
-    let user = await User.findOne({ $or: [{ googleId }, { email }] });
+    let user = await User.findOne({ $or: [{ googleId }, { email }] }).select('+sessions');
 
     if (user) {
         // Link Google account if not already linked
@@ -147,10 +167,12 @@ const googleAuth = async (credential) => {
         });
     }
 
+    await user.save(); // Save user first if new
+
     const accessToken = generateAccessToken(user._id);
     const refreshToken = generateRefreshToken(user._id);
-    user.refreshToken = refreshToken;
-    await user.save();
+
+    await createSession(user, refreshToken, ip, userAgent);
 
     return { user: user.toJSON(), accessToken, refreshToken };
 };
@@ -158,14 +180,80 @@ const googleAuth = async (credential) => {
 // Refresh access token
 const refreshAccessToken = async (refreshToken) => {
     const decoded = verifyRefreshToken(refreshToken);
-    const user = await User.findById(decoded.userId).select('+refreshToken');
+    const user = await User.findById(decoded.userId).select('+sessions');
 
-    if (!user || user.refreshToken !== refreshToken) {
+    if (!user) {
+        throw Object.assign(new Error('User not found'), { statusCode: 401 });
+    }
+
+    const session = user.sessions.find(s => s.refreshToken === refreshToken);
+    if (!session) {
         throw Object.assign(new Error('Invalid refresh token'), { statusCode: 401 });
     }
+
+    // Update last active
+    session.lastActive = new Date();
+    await user.save();
 
     const accessToken = generateAccessToken(user._id);
     return { accessToken };
 };
 
-module.exports = { signup, sendOTP, verifyOTP, login, googleAuth, refreshAccessToken };
+// Get active sessions
+const getSessions = async (userId) => {
+    const user = await User.findById(userId).select('+sessions');
+    return user.sessions.map(s => ({
+        _id: s._id,
+        device: s.device,
+        browser: s.browser,
+        os: s.os,
+        ip: s.ip,
+        location: s.location,
+        lastActive: s.lastActive,
+        maskedToken: s.refreshToken ? s.refreshToken.slice(-5) : '?????',
+        isCurrent: false
+    }));
+};
+
+// Logout (Revoke specific token)
+const logout = async (userId, refreshToken) => {
+    const user = await User.findById(userId).select('+sessions');
+    if (user) {
+        user.sessions = user.sessions.filter(s => s.refreshToken !== refreshToken);
+        await user.save();
+    }
+    return { message: 'Logged out' };
+};
+
+// Revoke specific session
+const revokeSession = async (userId, sessionId) => {
+    const user = await User.findById(userId).select('+sessions');
+    if (user) {
+        user.sessions = user.sessions.filter(s => s._id.toString() !== sessionId);
+        await user.save();
+    }
+    return { message: 'Session revoked' };
+};
+
+// Revoke all other sessions
+const revokeAllOtherSessions = async (userId, currentRefreshToken) => {
+    const user = await User.findById(userId).select('+sessions');
+    if (user) {
+        user.sessions = user.sessions.filter(s => s.refreshToken === currentRefreshToken);
+        await user.save();
+    }
+    return { message: 'All other sessions revoked' };
+};
+
+module.exports = {
+    signup,
+    sendOTP,
+    verifyOTP,
+    login,
+    googleAuth,
+    refreshAccessToken,
+    getSessions,
+    logout,
+    revokeSession,
+    revokeAllOtherSessions
+};

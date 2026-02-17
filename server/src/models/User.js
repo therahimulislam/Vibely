@@ -54,10 +54,22 @@ const userSchema = new mongoose.Schema(
             type: Boolean,
             default: false,
         },
-        refreshToken: {
-            type: String,
-            select: false,
-        },
+        sessions: [
+            {
+                refreshToken: String,
+                deviceId: String,
+                browser: String,
+                os: String,
+                device: String,
+                ip: String,
+                location: String,
+                lastActive: Date,
+                createdAt: {
+                    type: Date,
+                    default: Date.now,
+                },
+            },
+        ],
     },
     {
         timestamps: true,
@@ -83,7 +95,7 @@ userSchema.methods.toJSON = function () {
     delete user.password;
     delete user.otp;
     delete user.otpExpiry;
-    delete user.refreshToken;
+    delete user.sessions;
     delete user.__v;
     return user;
 };

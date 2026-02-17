@@ -15,5 +15,9 @@ router.post('/login', authLimiter, validateLogin, authController.login);
 router.post('/google', authLimiter, authController.googleAuth);
 router.post('/refresh', authController.refreshToken);
 router.get('/me', authenticate, authController.getMe);
+router.get('/sessions', authenticate, authController.getSessions);
+router.post('/logout', authenticate, authController.logout); // Updated to use POST and auth
+router.delete('/sessions/:sessionId', authenticate, authController.revokeSession);
+router.delete('/sessions', authenticate, authController.revokeAllOtherSessions);
 
 module.exports = router;

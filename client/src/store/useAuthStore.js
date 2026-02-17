@@ -101,7 +101,15 @@ const useAuthStore = create((set, get) => ({
     },
 
     // Logout
-    logout: () => {
+    logout: async () => {
+        const refreshToken = localStorage.getItem('refreshToken');
+        if (refreshToken) {
+            try {
+                await api.post('/auth/logout', { refreshToken });
+            } catch (err) {
+                console.error('Logout API failed', err);
+            }
+        }
         localStorage.removeItem('accessToken');
         localStorage.removeItem('refreshToken');
         set({ user: null, isAuthenticated: false, error: null });
