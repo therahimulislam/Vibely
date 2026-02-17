@@ -2,7 +2,7 @@
 // Individual message bubble with gradient, status, reactions, and context menu
 
 import { useState, useRef } from 'react';
-import { ArrowLeft, Phone, Video, MoreVertical, Pin, Trash2, Search, Play, FileText, Download } from 'lucide-react';
+import { ArrowLeft, Phone, Video, MoreVertical, Pin, Trash2, Search, Play, FileText, Download, SmilePlus, Edit3, Check, CheckCheck } from 'lucide-react';
 import useSocket from '../../hooks/useSocket';
 import useAuthStore from '../../store/useAuthStore';
 import { formatTime } from '../../utils/formatters';
