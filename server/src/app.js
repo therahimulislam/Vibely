@@ -16,6 +16,9 @@ const messageRoutes = require('./routes/messageRoutes');
 
 const app = express();
 
+// Trust proxy for rate limiting (needed for Heroku/AWS/Nginx)
+app.set('trust proxy', 1);
+
 // ─── Security Middleware ────────────────────────────
 app.use(helmet());
 app.use(cors({
