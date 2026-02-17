@@ -14,6 +14,8 @@ import Chat from './pages/Chat';
 import VideoCall from './components/call/VideoCall';
 import IncomingCall from './components/call/IncomingCall';
 
+import ManageSessions from './pages/ManageSessions';
+
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
 
 // Protected route wrapper
@@ -48,6 +50,7 @@ function AppContent() {
                 <Route path="/signup" element={<AuthRoute><Signup /></AuthRoute>} />
                 <Route path="/verify-otp" element={<VerifyOTP />} />
                 <Route path="/" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
+                <Route path="/settings/sessions" element={<ProtectedRoute><ManageSessions /></ProtectedRoute>} />
                 <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
             <VideoCall />

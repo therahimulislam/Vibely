@@ -88,16 +88,7 @@ exports.getMe = async (req, res) => {
 // GET /api/auth/sessions
 exports.getSessions = async (req, res) => {
     try {
-        const sessions = await authService.getSessions(req.user._id);
-        // Mark current session
-        // Note: We need the current refresh token to identify the current session.
-        // Assuming client sends refreshToken or we can deduce it? 
-        // Actually, we don't easily know which session matches the Access Token unless we store sessionID in AccessToken.
-        // But commonly we identify by "this device". The frontend can compare user agent strings or we just return all.
-        // Better: Identify by refresh token if provided? Or match current session by time?
-        // Let's just return raw sessions for now. Frontend can highlight "Current" if we passed session ID in token, but we didn't.
-        // Actually, let's mark the session that matches the current Refresh Token if the client sent it? No, client sends Access Token.
-        // We'll leave isCurrent logic for later or best-effort.
+        const sessions = await authService.getSessions(req.user._id, req.sessionId);
         res.json({ sessions });
     } catch (error) {
         res.status(500).json({ error: error.message });

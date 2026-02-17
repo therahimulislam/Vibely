@@ -42,6 +42,7 @@ const createSession = async (user, refreshToken, ip, userAgent, clientDeviceInfo
 
     user.sessions.push(session);
     await user.save();
+    return user.sessions[user.sessions.length - 1];
 };
 
 // Generate 6-digit OTP
@@ -113,10 +114,8 @@ const verifyOTP = async (email, otp, ip, userAgent, deviceId, deviceInfo) => {
     user.otpExpiry = undefined;
     await user.save();
 
-    const accessToken = generateAccessToken(user._id);
-    const refreshToken = generateRefreshToken(user._id);
-
-    await createSession(user, refreshToken, ip, userAgent, clientDeviceInfo);
+    const session = await createSession(user, refreshToken, ip, userAgent, clientDeviceInfo);
+    const accessToken = generateAccessToken(user._id, session._id);
 
     return { user: user.toJSON(), accessToken, refreshToken };
 };
@@ -149,10 +148,8 @@ const login = async (email, password, ip, userAgent, deviceId, deviceInfo) => {
         throw Object.assign(new Error('Email not verified. New OTP sent.'), { statusCode: 403, needsVerification: true });
     }
 
-    const accessToken = generateAccessToken(user._id);
-    const refreshToken = generateRefreshToken(user._id);
-
-    await createSession(user, refreshToken, ip, userAgent, clientDeviceInfo);
+    const session = await createSession(user, refreshToken, ip, userAgent, clientDeviceInfo);
+    const accessToken = generateAccessToken(user._id, session._id);
 
     return { user: user.toJSON(), accessToken, refreshToken };
 };
@@ -188,10 +185,8 @@ const googleAuth = async (credential, ip, userAgent, deviceId, deviceInfo) => {
 
     await user.save();
 
-    const accessToken = generateAccessToken(user._id);
-    const refreshToken = generateRefreshToken(user._id);
-
-    await createSession(user, refreshToken, ip, userAgent, clientDeviceInfo);
+    const session = await createSession(user, refreshToken, ip, userAgent, clientDeviceInfo);
+    const accessToken = generateAccessToken(user._id, session._id);
 
     return { user: user.toJSON(), accessToken, refreshToken };
 };
@@ -214,12 +209,12 @@ const refreshAccessToken = async (refreshToken) => {
     session.lastActive = new Date();
     await user.save();
 
-    const accessToken = generateAccessToken(user._id);
+    const accessToken = generateAccessToken(user._id, session._id);
     return { accessToken };
 };
 
 // Get active sessions
-const getSessions = async (userId) => {
+const getSessions = async (userId, currentSessionId) => {
     const user = await User.findById(userId).select('+sessions');
     return user.sessions.map(s => ({
         _id: s._id,
@@ -229,8 +224,7 @@ const getSessions = async (userId) => {
         ip: s.ip,
         location: s.location,
         lastActive: s.lastActive,
-        maskedToken: s.refreshToken ? s.refreshToken.slice(-5) : '?????',
-        isCurrent: false
+        isCurrent: currentSessionId ? s._id.toString() === currentSessionId.toString() : false
     }));
 };
 

@@ -12,6 +12,7 @@ Vibely is a modern, full-stack real-time messaging application inspired by Whats
 - **Media Sharing**: Image upload support via Cloudinary.
 - **Secure Auth**: JWT-based authentication with Google OAuth support.
 - **Interactive**: Typing indicators, online status, message reactions, and read receipts.
+- **Session Management**: View active sessions, identify current device, and revoke suspicious sessions.
 - **Responsive**: Fully responsive design for desktop and mobile.
 
 ## 🛠 Tech Stack

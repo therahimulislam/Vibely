@@ -98,6 +98,36 @@ const useAuthStore = create((set, get) => ({
         }
     },
 
+    // Get active sessions
+    getSessions: async () => {
+        try {
+            const { data } = await api.get('/auth/sessions');
+            return data.sessions;
+        } catch (error) {
+            console.error('Failed to fetch sessions', error);
+            return [];
+        }
+    },
+
+    // Revoke session
+    revokeSession: async (sessionId) => {
+        try {
+            await api.delete(`/auth/sessions/${sessionId}`);
+        } catch (error) {
+            throw new Error(error.response?.data?.error || 'Failed to revoke session');
+        }
+    },
+
+    // Revoke all other sessions
+    revokeAllOtherSessions: async () => {
+        try {
+            const refreshToken = localStorage.getItem('refreshToken');
+            await api.delete('/auth/sessions', { data: { currentRefreshToken: refreshToken } });
+        } catch (error) {
+            throw new Error(error.response?.data?.error || 'Failed to revoke other sessions');
+        }
+    },
+
     // Logout
     logout: async () => {
         const refreshToken = localStorage.getItem('refreshToken');
