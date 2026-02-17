@@ -28,13 +28,14 @@ const useAuthStore = create((set, get) => ({
 
     // Signup
     signup: async (name, email, password) => {
-        set({ error: null });
+        set({ error: null, isLoading: true });
         try {
             const { data } = await api.post('/auth/signup', { name, email, password });
+            set({ isLoading: false });
             return data;
         } catch (error) {
             const msg = error.response?.data?.error || error.response?.data?.errors?.[0] || 'Signup failed';
-            set({ error: msg });
+            set({ error: msg, isLoading: false });
             throw new Error(msg);
         }
     },
@@ -57,17 +58,17 @@ const useAuthStore = create((set, get) => ({
 
     // Login
     login: async (email, password) => {
-        set({ error: null });
+        set({ error: null, isLoading: true });
         try {
             const { data } = await api.post('/auth/login', { email, password });
             localStorage.setItem('accessToken', data.accessToken);
             localStorage.setItem('refreshToken', data.refreshToken);
-            set({ user: data.user, isAuthenticated: true });
+            set({ user: data.user, isAuthenticated: true, isLoading: false });
             return data;
         } catch (error) {
             const msg = error.response?.data?.error || 'Login failed';
             const needsVerification = error.response?.data?.needsVerification;
-            set({ error: msg });
+            set({ error: msg, isLoading: false });
             throw Object.assign(new Error(msg), { needsVerification });
         }
     },

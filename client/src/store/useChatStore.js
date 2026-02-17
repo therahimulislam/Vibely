@@ -21,7 +21,7 @@ const useChatStore = create((set, get) => ({
         set({ isLoadingChats: true });
         try {
             const { data } = await api.get('/chats');
-            set({ chats: data.chats, isLoadingChats: false });
+            set({ chats: data.chats || [], isLoadingChats: false });
         } catch (error) {
             set({ isLoadingChats: false });
             console.error('Failed to fetch chats:', error);

@@ -11,8 +11,9 @@ export default function ChatList() {
     const { user } = useAuthStore();
 
     // Filter chats based on search
+    const safeChats = Array.isArray(chats) ? chats : [];
     const filteredChats = searchQuery
-        ? chats.filter((chat) => {
+        ? safeChats.filter((chat) => {
             if (chat.isGroup) {
                 return chat.groupName.toLowerCase().includes(searchQuery.toLowerCase());
             }
