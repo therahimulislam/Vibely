@@ -114,6 +114,7 @@ const verifyOTP = async (email, otp, ip, userAgent, deviceId, deviceInfo) => {
     user.otpExpiry = undefined;
     await user.save();
 
+    const refreshToken = generateRefreshToken(user._id);
     const session = await createSession(user, refreshToken, ip, userAgent, clientDeviceInfo);
     const accessToken = generateAccessToken(user._id, session._id);
 
@@ -148,6 +149,7 @@ const login = async (email, password, ip, userAgent, deviceId, deviceInfo) => {
         throw Object.assign(new Error('Email not verified. New OTP sent.'), { statusCode: 403, needsVerification: true });
     }
 
+    const refreshToken = generateRefreshToken(user._id);
     const session = await createSession(user, refreshToken, ip, userAgent, clientDeviceInfo);
     const accessToken = generateAccessToken(user._id, session._id);
 
@@ -185,6 +187,7 @@ const googleAuth = async (credential, ip, userAgent, deviceId, deviceInfo) => {
 
     await user.save();
 
+    const refreshToken = generateRefreshToken(user._id);
     const session = await createSession(user, refreshToken, ip, userAgent, clientDeviceInfo);
     const accessToken = generateAccessToken(user._id, session._id);
 
