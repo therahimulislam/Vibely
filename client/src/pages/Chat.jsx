@@ -7,6 +7,7 @@ import Sidebar from '../components/layout/Sidebar';
 import MessageArea from '../components/chat/MessageArea';
 import UserProfile from '../components/user/UserProfile';
 import { MessageCircle } from 'lucide-react';
+import ErrorBoundary from '../components/ErrorBoundary';
 
 export default function Chat() {
     const { fetchChats, activeChat } = useChatStore();
@@ -36,13 +37,17 @@ export default function Chat() {
                 <Sidebar onProfileClick={() => setShowProfile(true)} />
             </div>
 
+
+
             {/* Main Chat Area */}
             <div className={`${!showSidebar || activeChat ? 'flex' : 'hidden'} md:flex flex-1 flex-col min-w-0`}>
                 {activeChat ? (
-                    <MessageArea
-                        onBack={handleBack}
-                        onProfileClick={() => setShowProfile(true)}
-                    />
+                    <ErrorBoundary>
+                        <MessageArea
+                            onBack={handleBack}
+                            onProfileClick={() => setShowProfile(true)}
+                        />
+                    </ErrorBoundary>
                 ) : (
                     // Empty state
                     <div className="flex-1 flex items-center justify-center">
