@@ -23,13 +23,17 @@ export default function MessageArea({ onBack, onProfileClick }) {
     const [searchMessages, setSearchMessages] = useState('');
     const [showSearch, setShowSearch] = useState(false);
 
-    const otherUser = activeChat?.participants?.find((p) => p._id !== user._id);
+    // Defensive check
+    if (!user || !activeChat) return null;
+
+    const participants = activeChat?.participants || [];
+    const otherUser = participants.find((p) => p._id !== user._id);
 
     const chatInfo = activeChat?.isGroup ? {
         name: activeChat.groupName,
         avatar: activeChat.groupAvatar,
         isGroup: true,
-        onlineStatus: `${activeChat.participants.length} members`
+        onlineStatus: `${participants.length} members`
     } : {
         name: otherUser?.name,
         avatar: otherUser?.avatar,

@@ -29,18 +29,18 @@ export default function MessageBubble({ message, isOwn, otherUser, showAvatar })
     }
 
     const handleReaction = (emoji) => {
-        emitReaction(message._id, emoji, otherUser._id);
+        emitReaction(message._id, emoji, otherUser?._id);
         setShowReactions(false);
     };
 
     const handleDelete = (type = 'me') => {
-        emitDeleteMessage(message._id, message.chatId, otherUser._id, type);
+        emitDeleteMessage(message._id, message.chatId, otherUser?._id, type);
         setShowContext(false);
     };
 
     const handleEdit = () => {
         if (editText.trim() && editText !== message.text) {
-            emitEditMessage(message._id, editText, otherUser._id);
+            emitEditMessage(message._id, editText, otherUser?._id);
         }
         setIsEditing(false);
     };
@@ -57,6 +57,8 @@ export default function MessageBubble({ message, isOwn, otherUser, showAvatar })
         }
     };
 
+    const sender = message.senderId || {};
+
     return (
         <>
             <div
@@ -65,13 +67,13 @@ export default function MessageBubble({ message, isOwn, otherUser, showAvatar })
             >
                 {/* Avatar for received messages */}
                 {!isOwn && showAvatar && (
-                    <div className="w-7 h-7 rounded-full overflow-hidden mr-2 mt-auto flex-shrink-0">
-                        {otherUser.avatar ? (
-                            <img src={otherUser.avatar} alt="" className="w-full h-full object-cover" />
+                    <div className="w-7 h-7 rounded-full overflow-hidden mr-2 mt-auto flex-shrink-0" title={sender.name}>
+                        {sender.avatar ? (
+                            <img src={sender.avatar} alt={sender.name} className="w-full h-full object-cover" />
                         ) : (
                             <div className="w-full h-full flex items-center justify-center text-white text-[10px] font-bold"
                                 style={{ background: 'var(--gradient-accent)' }}>
-                                {otherUser.name[0].toUpperCase()}
+                                {sender.name?.[0]?.toUpperCase() || '?'}
                             </div>
                         )}
                     </div>

@@ -71,25 +71,19 @@ module.exports = (io, socket, onlineUsers) => {
     });
 
     // Typing indicator
-    socket.on('typing', ({ chatId, recipientId }) => {
-        const recipientSocketId = onlineUsers.get(recipientId);
-        if (recipientSocketId) {
-            io.to(recipientSocketId).emit('userTyping', {
-                chatId,
-                userId: socket.userId,
-            });
-        }
+    socket.on('typing', ({ chatId }) => {
+        notifyChatParticipants(chatId, 'userTyping', {
+            chatId,
+            userId: socket.userId,
+        }, socket.userId);
     });
 
     // Stop typing
-    socket.on('stopTyping', ({ chatId, recipientId }) => {
-        const recipientSocketId = onlineUsers.get(recipientId);
-        if (recipientSocketId) {
-            io.to(recipientSocketId).emit('userStopTyping', {
-                chatId,
-                userId: socket.userId,
-            });
-        }
+    socket.on('stopTyping', ({ chatId }) => {
+        notifyChatParticipants(chatId, 'userStopTyping', {
+            chatId,
+            userId: socket.userId,
+        }, socket.userId);
     });
 
     // Message seen
@@ -125,8 +119,24 @@ module.exports = (io, socket, onlineUsers) => {
         }
     });
 
+    // Helper to notify all participants
+    const notifyChatParticipants = async (chatId, eventName, data, socketUserId) => {
+        const chat = await Chat.findById(chatId);
+        if (!chat) return;
+
+        chat.participants.forEach((pId) => {
+            const recipientId = pId.toString();
+            if (recipientId !== socketUserId) {
+                const recipientSocketId = onlineUsers.get(recipientId);
+                if (recipientSocketId) {
+                    io.to(recipientSocketId).emit(eventName, data);
+                }
+            }
+        });
+    };
+
     // Message reaction
-    socket.on('messageReaction', async ({ messageId, emoji, recipientId }) => {
+    socket.on('messageReaction', async ({ messageId, emoji }) => {
         try {
             const message = await Message.findById(messageId);
             if (!message) return;
@@ -139,7 +149,6 @@ module.exports = (io, socket, onlineUsers) => {
             if (existingIndex > -1) {
                 message.reactions.splice(existingIndex, 1);
             } else {
-                // Remove any existing reaction from this user first
                 message.reactions = message.reactions.filter(
                     (r) => r.userId.toString() !== socket.userId
                 );
@@ -152,19 +161,19 @@ module.exports = (io, socket, onlineUsers) => {
                 .populate('senderId', 'name avatar')
                 .populate('reactions.userId', 'name');
 
-            // Notify both users
+            // Notify sender
             socket.emit('messageUpdated', { message: populated });
-            const recipientSocketId = onlineUsers.get(recipientId);
-            if (recipientSocketId) {
-                io.to(recipientSocketId).emit('messageUpdated', { message: populated });
-            }
+
+            // Notify others
+            await notifyChatParticipants(message.chatId, 'messageUpdated', { message: populated }, socket.userId);
+
         } catch (error) {
             console.error('Reaction error:', error);
         }
     });
 
     // Message delete
-    socket.on('deleteMessage', async ({ messageId, chatId, recipientId, type }) => {
+    socket.on('deleteMessage', async ({ messageId, chatId, type }) => {
         try {
             const message = await Message.findById(messageId);
             if (!message) return;
@@ -176,13 +185,11 @@ module.exports = (io, socket, onlineUsers) => {
                 message.text = '';
                 message.imageUrl = '';
                 message.videoUrl = '';
+                message.fileUrl = ''; // Also clear file
                 await message.save();
 
-                const recipientSocketId = onlineUsers.get(recipientId);
-                if (recipientSocketId) {
-                    io.to(recipientSocketId).emit('messageDeleted', { messageId, chatId, type: 'everyone' });
-                }
                 socket.emit('messageDeleted', { messageId, chatId, type: 'everyone' });
+                await notifyChatParticipants(chatId, 'messageDeleted', { messageId, chatId, type: 'everyone' }, socket.userId);
             } else {
                 // Delete for me
                 if (!message.deletedFor.includes(socket.userId)) {
@@ -197,7 +204,7 @@ module.exports = (io, socket, onlineUsers) => {
     });
 
     // Message edit
-    socket.on('editMessage', async ({ messageId, text, recipientId }) => {
+    socket.on('editMessage', async ({ messageId, text }) => {
         try {
             const message = await Message.findById(messageId);
             if (!message || message.senderId.toString() !== socket.userId) return;
@@ -208,11 +215,8 @@ module.exports = (io, socket, onlineUsers) => {
 
             const populated = await Message.findById(messageId).populate('senderId', 'name avatar');
 
-            const recipientSocketId = onlineUsers.get(recipientId);
-            if (recipientSocketId) {
-                io.to(recipientSocketId).emit('messageUpdated', { message: populated });
-            }
             socket.emit('messageUpdated', { message: populated });
+            await notifyChatParticipants(message.chatId, 'messageUpdated', { message: populated }, socket.userId);
         } catch (error) {
             console.error('Edit error:', error);
         }
