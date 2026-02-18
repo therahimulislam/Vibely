@@ -81,7 +81,7 @@ export default function ChatList() {
                     isOnline = onlineUsers instanceof Set ? onlineUsers.has(displayUser._id) : false;
                 }
 
-                const isTyping = typingUsers[chat._id]; // Just check if truthy for now
+                const isTyping = typingUsers?.[chat._id]; // Just check if truthy for now
                 const unread = chat.unreadCount?.[user._id] || 0;
                 const isPinned = chat.pinnedBy?.includes(user._id);
 

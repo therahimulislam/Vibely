@@ -39,12 +39,12 @@ export default function MessageArea({ onBack, onProfileClick }) {
         name: otherUser?.name,
         avatar: otherUser?.avatar,
         isGroup: false,
-        onlineStatus: onlineUsers.has(otherUser?._id) ? 'online' : `last seen ${formatLastSeen(otherUser?.lastSeen)}`,
+        onlineStatus: (onlineUsers instanceof Set && onlineUsers.has(otherUser?._id)) ? 'online' : `last seen ${formatLastSeen(otherUser?.lastSeen)}`,
         _id: otherUser?._id
     };
 
-    const isOnline = !chatInfo.isGroup && onlineUsers.has(otherUser?._id);
-    const isTyping = typingUsers[activeChat?._id];
+    const isOnline = !chatInfo.isGroup && (onlineUsers instanceof Set ? onlineUsers.has(otherUser?._id) : false);
+    const isTyping = typingUsers?.[activeChat?._id];
     const isPinned = activeChat?.pinnedBy?.includes(user._id);
 
     // Scroll to bottom on new messages
