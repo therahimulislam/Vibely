@@ -115,19 +115,25 @@ exports.sendMessage = async (req, res) => {
             status: 'sent',
         });
 
-        // Update chat's last message
-        chat.lastMessage = message._id;
-        chat.updatedAt = new Date();
+        // Update chat's last message and increment unread counts atomically
+        const updateOperation = {
+            lastMessage: message._id,
+            updatedAt: new Date(),
+        };
 
-        // Increment unread count for other participants
+        // Initialize $inc operator for unread counts
+        const incUpdates = {};
         chat.participants.forEach((pId) => {
             if (pId.toString() !== req.userId.toString()) {
-                const currentCount = chat.unreadCount.get(pId.toString()) || 0;
-                chat.unreadCount.set(pId.toString(), currentCount + 1);
+                incUpdates[`unreadCount.${pId}`] = 1;
             }
         });
 
-        await chat.save();
+        if (Object.keys(incUpdates).length > 0) {
+            updateOperation['$inc'] = incUpdates;
+        }
+
+        await Chat.findByIdAndUpdate(chatId, updateOperation);
 
         const populatedMessage = await Message.findById(message._id).populate('senderId', 'name avatar');
 

@@ -28,14 +28,14 @@ const useAuthStore = create((set, get) => ({
 
     // Signup
     signup: async (name, email, password) => {
-        set({ error: null, isLoading: true });
+        set({ error: null }); // Removed isLoading: true
         try {
             const { data } = await api.post('/auth/signup', { name, email, password });
-            set({ isLoading: false });
+            // isLoading is managed locally in components
             return data;
         } catch (error) {
             const msg = error.response?.data?.error || error.response?.data?.errors?.[0] || 'Signup failed';
-            set({ error: msg, isLoading: false });
+            set({ error: msg });
             throw new Error(msg);
         }
     },
@@ -50,7 +50,7 @@ const useAuthStore = create((set, get) => ({
             set({ user: data.user, isAuthenticated: true });
             return data;
         } catch (error) {
-            const msg = error.response?.data?.error || 'Verification failed';
+            const msg = error.response?.data?.error || error.response?.data?.errors?.[0] || 'Verification failed';
             set({ error: msg });
             throw new Error(msg);
         }
@@ -58,17 +58,17 @@ const useAuthStore = create((set, get) => ({
 
     // Login
     login: async (email, password) => {
-        set({ error: null, isLoading: true });
+        set({ error: null }); // Removed isLoading: true
         try {
             const { data } = await api.post('/auth/login', { email, password });
             localStorage.setItem('accessToken', data.accessToken);
             localStorage.setItem('refreshToken', data.refreshToken);
-            set({ user: data.user, isAuthenticated: true, isLoading: false });
+            set({ user: data.user, isAuthenticated: true }); // Removed isLoading: false
             return data;
         } catch (error) {
-            const msg = error.response?.data?.error || 'Login failed';
+            const msg = error.response?.data?.error || error.response?.data?.errors?.[0] || 'Login failed';
             const needsVerification = error.response?.data?.needsVerification;
-            set({ error: msg, isLoading: false });
+            set({ error: msg }); // Removed isLoading: false
             throw Object.assign(new Error(msg), { needsVerification });
         }
     },

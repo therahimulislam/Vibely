@@ -6,31 +6,26 @@ import api from '../api/axios';
 
 const useChatStore = create((set, get) => ({
     chats: [],
-    activeChat: null,
-    messages: [],
-    isLoadingChats: false,
-    isLoadingMessages: false,
-    hasMoreMessages: false,
-    currentPage: 1,
-    searchQuery: '',
-    typingUsers: {}, // { chatId: userId }
-    onlineUsers: new Set(),
+    error: null,
 
     // Fetch all chats for current user
     fetchChats: async () => {
-        set({ isLoadingChats: true });
+        set({ isLoadingChats: true, error: null });
         try {
             const { data } = await api.get('/chats');
             set({ chats: data.chats || [], isLoadingChats: false });
         } catch (error) {
-            set({ isLoadingChats: false });
+            set({
+                isLoadingChats: false,
+                error: error.response?.data?.error || 'Failed to fetch chats'
+            });
             console.error('Failed to fetch chats:', error);
         }
     },
 
     // Set active chat and load messages
     setActiveChat: async (chat) => {
-        set({ activeChat: chat, messages: [], currentPage: 1, hasMoreMessages: false });
+        set({ activeChat: chat, messages: [], currentPage: 1, hasMoreMessages: false, error: null });
         if (chat) {
             await get().fetchMessages(chat._id, 1);
         }
@@ -38,7 +33,7 @@ const useChatStore = create((set, get) => ({
 
     // Fetch messages for a chat (paginated)
     fetchMessages: async (chatId, page = 1) => {
-        set({ isLoadingMessages: true });
+        set({ isLoadingMessages: true, error: null });
         try {
             const { data } = await api.get(`/messages/${chatId}?page=${page}&limit=30`);
             set((state) => ({
@@ -48,7 +43,10 @@ const useChatStore = create((set, get) => ({
                 isLoadingMessages: false,
             }));
         } catch (error) {
-            set({ isLoadingMessages: false });
+            set({
+                isLoadingMessages: false,
+                error: error.response?.data?.error || 'Failed to fetch messages'
+            });
             console.error('Failed to fetch messages:', error);
         }
     },
@@ -62,6 +60,7 @@ const useChatStore = create((set, get) => ({
 
     // Create or find 1-on-1 chat
     createChat: async (participantId) => {
+        set({ error: null });
         try {
             const { data } = await api.post('/chats/create', { participantId });
             if (data.isNew) {
@@ -71,6 +70,8 @@ const useChatStore = create((set, get) => ({
             await get().fetchMessages(data.chat._id, 1);
             return data.chat;
         } catch (error) {
+            const msg = error.response?.data?.error || 'Failed to create chat';
+            set({ error: msg });
             console.error('Failed to create chat:', error);
             throw error;
         }

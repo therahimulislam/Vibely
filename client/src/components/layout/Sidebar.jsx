@@ -14,7 +14,7 @@ import toast from 'react-hot-toast';
 export default function Sidebar({ onProfileClick }) {
     const navigate = useNavigate();
     const { user, logout } = useAuthStore();
-    const { searchQuery, setSearchQuery, createChat, fetchChats } = useChatStore();
+    const { searchQuery, setSearchQuery, createChat, fetchChats, error } = useChatStore();
     const [showNewChat, setShowNewChat] = useState(false);
     const [showNewGroup, setShowNewGroup] = useState(false);
     const [groupName, setGroupName] = useState('');
@@ -23,6 +23,13 @@ export default function Sidebar({ onProfileClick }) {
     const [userSearchQuery, setUserSearchQuery] = useState('');
     const [isSearching, setIsSearching] = useState(false);
     const isDark = document.documentElement.classList.contains('dark');
+
+    // Display store errors
+    useEffect(() => {
+        if (error) {
+            toast.error(error);
+        }
+    }, [error]);
 
     // Search users for new chat
     useEffect(() => {
