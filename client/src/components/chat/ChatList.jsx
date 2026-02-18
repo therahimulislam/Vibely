@@ -77,7 +77,8 @@ export default function ChatList() {
                     const validParticipants = (chat.participants || []).filter(p => p);
                     displayUser = validParticipants.find((p) => p._id !== user._id);
                     if (!displayUser) return null;
-                    isOnline = onlineUsers.has(displayUser._id);
+                    // Safeguard against onlineUsers not being a Set
+                    isOnline = onlineUsers instanceof Set ? onlineUsers.has(displayUser._id) : false;
                 }
 
                 const isTyping = typingUsers[chat._id]; // Just check if truthy for now
