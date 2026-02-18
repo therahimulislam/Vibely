@@ -35,6 +35,7 @@ export default function VideoCall() {
                 ref={remoteVideoRef}
                 autoPlay
                 playsInline
+                onLoadedMetadata={() => remoteVideoRef.current?.play().catch(e => console.error('Remote video play error:', e))}
                 className="absolute inset-0 w-full h-full object-cover"
             />
 
@@ -63,6 +64,7 @@ export default function VideoCall() {
                     autoPlay
                     playsInline
                     muted
+                    onLoadedMetadata={() => localVideoRef.current?.play().catch(e => console.error('Local video play error:', e))}
                     className={`w-full h-full object-cover ${isVideoOff ? 'hidden' : ''}`}
                 />
                 {isVideoOff && (
