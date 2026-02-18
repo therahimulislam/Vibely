@@ -115,10 +115,11 @@ exports.sendMessage = async (req, res) => {
             status: 'sent',
         });
 
-        // Update chat's last message and increment unread counts atomically
+        // Update chat's last message, increment unread counts, and restore chat for all
         const updateOperation = {
             lastMessage: message._id,
             updatedAt: new Date(),
+            $set: { deletedBy: [] }
         };
 
         // Initialize $inc operator for unread counts

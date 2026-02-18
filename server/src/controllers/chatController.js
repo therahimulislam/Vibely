@@ -7,7 +7,10 @@ const User = require('../models/User');
 // GET /api/chats - Get all chats for current user
 exports.getChats = async (req, res) => {
     try {
-        const chats = await Chat.find({ participants: req.userId })
+        const chats = await Chat.find({
+            participants: req.userId,
+            deletedBy: { $ne: req.userId }
+        })
             .populate('participants', 'name email avatar isOnline lastSeen')
             .populate('lastMessage')
             .sort({ updatedAt: -1 });

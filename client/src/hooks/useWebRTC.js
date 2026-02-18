@@ -1,7 +1,7 @@
 // client/src/hooks/useWebRTC.js
 // WebRTC hook for video calls with E2E encryption via DTLS-SRTP
 
-import { useRef, useCallback, useEffect } from 'react';
+import { useRef, useCallback, useEffect, useState } from 'react';
 import { getSocket } from './useSocket';
 import useCallStore from '../store/useCallStore';
 import useAuthStore from '../store/useAuthStore';
@@ -25,12 +25,22 @@ const useWebRTC = () => {
     } = useCallStore();
     const { user } = useAuthStore();
 
+    const [facingMode, setFacingMode] = useState('user');
+
     // Get user media
-    const getMedia = useCallback(async () => {
+    const getMedia = useCallback(async (mode = 'user') => {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
-                video: true,
-                audio: true,
+                video: {
+                    facingMode: mode,
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                },
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true,
+                },
             });
             setLocalStream(stream);
             return stream;
@@ -39,6 +49,31 @@ const useWebRTC = () => {
             throw error;
         }
     }, []);
+
+    // Switch camera
+    const switchCamera = useCallback(async () => {
+        const newMode = facingMode === 'user' ? 'environment' : 'user';
+        setFacingMode(newMode);
+
+        try {
+            // Stop existing video track to release camera
+            if (localStream) {
+                localStream.getVideoTracks().forEach(track => track.stop());
+            }
+
+            const stream = await getMedia(newMode);
+            const videoTrack = stream.getVideoTracks()[0];
+
+            if (peerConnection.current) {
+                const sender = peerConnection.current.getSenders().find(s => s.track?.kind === 'video');
+                if (sender) {
+                    sender.replaceTrack(videoTrack);
+                }
+            }
+        } catch (error) {
+            console.error('Failed to switch camera:', error);
+        }
+    }, [facingMode, localStream, getMedia]);
 
     // Create peer connection
     const createPeerConnection = useCallback((stream) => {
@@ -232,6 +267,7 @@ const useWebRTC = () => {
         endCall: handleEndCall,
         toggleAudio,
         toggleVideo,
+        switchCamera,
     };
 };
 

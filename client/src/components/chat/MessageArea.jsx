@@ -13,7 +13,7 @@ import TypingIndicator from './TypingIndicator';
 import { formatLastSeen } from '../../utils/formatters';
 
 export default function MessageArea({ onBack, onProfileClick }) {
-    const { activeChat, messages, isLoadingMessages, hasMoreMessages, loadMoreMessages, typingUsers, onlineUsers, markAsSeen, togglePin } = useChatStore();
+    const { activeChat, messages, isLoadingMessages, hasMoreMessages, loadMoreMessages, typingUsers, onlineUsers, markAsSeen, togglePin, deleteChat, addToGroup } = useChatStore();
     const { user } = useAuthStore();
     const { emitMessageSeen } = useSocket();
     const { startCall } = useWebRTC();
@@ -95,12 +95,12 @@ export default function MessageArea({ onBack, onProfileClick }) {
         <div className="flex-1 flex flex-col h-full">
             {/* Chat Header */}
             <div className="px-4 py-3 flex items-center justify-between flex-shrink-0 glass-panel border-b border-white/5">
-                <div className="flex items-center gap-3">
-                    <button onClick={onBack} className="md:hidden p-1 rounded-lg hover:bg-white/5">
+                <div className="flex items-center gap-3 min-w-0 flex-1 mr-2">
+                    <button onClick={onBack} className="md:hidden p-1 rounded-lg hover:bg-white/5 flex-shrink-0">
                         <ArrowLeft className="w-5 h-5" />
                     </button>
 
-                    <div className="w-10 h-10 rounded-full overflow-hidden cursor-pointer" onClick={onProfileClick}>
+                    <div className="w-10 h-10 rounded-full overflow-hidden cursor-pointer flex-shrink-0" onClick={onProfileClick}>
                         {chatInfo.avatar ? (
                             <img src={chatInfo.avatar} alt={chatInfo.name} className="w-full h-full object-cover" />
                         ) : (
@@ -111,9 +111,9 @@ export default function MessageArea({ onBack, onProfileClick }) {
                         )}
                     </div>
 
-                    <div>
-                        <h3 className="font-semibold text-sm">{chatInfo.name}</h3>
-                        <p className="text-xs opacity-50">
+                    <div className="min-w-0 flex-1">
+                        <h3 className="font-semibold text-sm truncate">{chatInfo.name}</h3>
+                        <p className="text-xs opacity-50 truncate">
                             {isTyping
                                 ? 'typing...'
                                 : chatInfo.onlineStatus}
@@ -121,10 +121,10 @@ export default function MessageArea({ onBack, onProfileClick }) {
                     </div>
                 </div>
 
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1 flex-shrink-0">
                     <button
                         onClick={() => setShowSearch(!showSearch)}
-                        className="p-2 rounded-xl hover:bg-white/5 transition-colors"
+                        className="hidden md:block p-2 rounded-xl hover:bg-white/5 transition-colors"
                     >
                         <Search className="w-5 h-5 opacity-50" />
                     </button>
@@ -152,6 +152,32 @@ export default function MessageArea({ onBack, onProfileClick }) {
                                 >
                                     <Pin className="w-4 h-4" />
                                     {isPinned ? 'Unpin Chat' : 'Pin Chat'}
+                                </button>
+                                {chatInfo.isGroup && (
+                                    <button
+                                        onClick={() => {
+                                            const email = window.prompt('Enter user email to add:');
+                                            if (email) addToGroup(activeChat._id, null, email);
+                                            setShowMenu(false);
+                                        }}
+                                        className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-lg hover:bg-white/5 transition-colors"
+                                    >
+                                        <UserPlus className="w-4 h-4" />
+                                        Add Members
+                                    </button>
+                                )}
+                                <button
+                                    onClick={() => {
+                                        if (window.confirm('Are you sure you want to delete this chat?')) {
+                                            deleteChat(activeChat._id);
+                                            onBack(); // Go back to list on mobile/desktop
+                                        }
+                                        setShowMenu(false);
+                                    }}
+                                    className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-lg hover:bg-red-500/10 text-red-400 transition-colors"
+                                >
+                                    <Trash2 className="w-4 h-4" />
+                                    Delete Chat
                                 </button>
                             </div>
                         )}

@@ -11,6 +11,8 @@ router.use(authenticate);
 router.get('/', chatController.getChats);
 router.post('/create', chatController.createChat);
 router.post('/group', chatController.createGroupChat);
+router.put('/group/add', chatController.addToGroup);
 router.patch('/:id/pin', chatController.togglePinChat);
+router.delete('/:id', chatController.deleteChat);
 
 module.exports = router;

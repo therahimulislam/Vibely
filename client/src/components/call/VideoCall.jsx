@@ -2,25 +2,27 @@
 // Full-screen video call overlay
 
 import { useRef, useEffect } from 'react';
-import { Mic, MicOff, Video, VideoOff, PhoneOff } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, PhoneOff, RefreshCcw } from 'lucide-react';
 import useCallStore from '../../store/useCallStore';
 import useWebRTC from '../../hooks/useWebRTC';
 
 export default function VideoCall() {
     const { isInCall, isCalling, localStream, remoteStream, isAudioMuted, isVideoOff, callerInfo } = useCallStore();
-    const { endCall, toggleAudio, toggleVideo } = useWebRTC();
+    const { endCall, toggleAudio, toggleVideo, switchCamera } = useWebRTC();
     const localVideoRef = useRef(null);
     const remoteVideoRef = useRef(null);
 
     useEffect(() => {
         if (localVideoRef.current && localStream) {
             localVideoRef.current.srcObject = localStream;
+            localVideoRef.current.play().catch(e => console.error('Local video play error:', e));
         }
     }, [localStream]);
 
     useEffect(() => {
         if (remoteVideoRef.current && remoteStream) {
             remoteVideoRef.current.srcObject = remoteStream;
+            remoteVideoRef.current.play().catch(e => console.error('Remote video play error:', e));
         }
     }, [remoteStream]);
 
@@ -92,6 +94,13 @@ export default function VideoCall() {
                         }`}
                 >
                     {isVideoOff ? <VideoOff className="w-6 h-6" /> : <Video className="w-6 h-6" />}
+                </button>
+
+                <button
+                    onClick={switchCamera}
+                    className="w-14 h-14 rounded-full bg-white/10 text-white hover:bg-white/20 flex items-center justify-center transition-all"
+                >
+                    <RefreshCcw className="w-6 h-6" />
                 </button>
 
                 <button

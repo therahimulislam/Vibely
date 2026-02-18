@@ -155,6 +155,35 @@ const useChatStore = create((set, get) => ({
         }
     },
 
+    // Delete chat
+    deleteChat: async (chatId) => {
+        try {
+            await api.delete(`/chats/${chatId}`);
+            set((state) => ({
+                chats: state.chats.filter((c) => c._id !== chatId),
+                activeChat: state.activeChat?._id === chatId ? null : state.activeChat,
+                messages: state.activeChat?._id === chatId ? [] : state.messages,
+            }));
+        } catch (error) {
+            console.error('Failed to delete chat:', error);
+        }
+    },
+
+    // Add user to group
+    addToGroup: async (chatId, userId, email) => {
+        try {
+            const { data } = await api.put('/chats/group/add', { chatId, userId, email });
+            set((state) => ({
+                chats: state.chats.map((c) => (c._id === chatId ? data.chat : c)),
+                activeChat: state.activeChat?._id === chatId ? data.chat : state.activeChat,
+            }));
+            toast.success('User added to group');
+        } catch (error) {
+            console.error('Failed to add to group:', error);
+            toast.error(error.response?.data?.error || 'Failed to add user');
+        }
+    },
+
     // Typing indicators
     setTyping: (chatId, userId) => {
         set((state) => ({
