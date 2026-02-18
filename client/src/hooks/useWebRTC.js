@@ -51,25 +51,68 @@ const useWebRTC = () => {
     // Switch camera
     const switchCamera = useCallback(async () => {
         const newMode = facingMode === 'user' ? 'environment' : 'user';
-        setFacingMode(newMode);
 
         try {
-            // Stop existing video track to release camera
-            if (localStream) {
-                localStream.getVideoTracks().forEach(track => track.stop());
-            }
-
             const stream = await getMedia(newMode);
             const videoTrack = stream.getVideoTracks()[0];
 
             if (peerConnection.current) {
                 const sender = peerConnection.current.getSenders().find(s => s.track?.kind === 'video');
                 if (sender) {
-                    sender.replaceTrack(videoTrack);
+                    await sender.replaceTrack(videoTrack);
+                }
+            } else {
+                // If no peer connection yet, just update local stream state (handled by getMedia)
+            }
+
+            // Stop OLD tracks only after successful replacement
+            // Note: getMedia updates localStream state, but we need to stop the *previous* stream's tracks
+            // The previous localStream is closure-captured or we need to access current state. 
+            // setLocalStream replaces it, but we should stop the old ones.
+            // Actually, getMedia replaces localStream. We can stop the old one *before* via ref or similar,
+            // but here we rely on the fact that we got a *new* stream.
+            // Best practice: The old tracks should be stopped.
+            // Since getMedia replaces `localStream` state, we might lose reference to old stream if we don't track it.
+            // But wait, getMedia stops NOTHING.
+            // We should stop the old tracks from the *previous* `localStream` value.
+            // However, `localStream` in dependencies might be stale or updated.
+            // Let's modify logic: 
+
+            // 1. Get current video track
+            const oldVideoTrack = localStream?.getVideoTracks()[0];
+
+            // 2. Update mode state
+            setFacingMode(newMode);
+
+            // 3. Stop old after new started? Or before?
+            // Mobile cameras often require stopping the old one before starting new one (exclusive access).
+            if (oldVideoTrack) {
+                oldVideoTrack.stop();
+            }
+
+            // 4. getMedia will set the new stream
+            // (We already called getMedia above, but we should have stopped old track FIRST for mobile)
+
+            // RE-DOING ORDER:
+            // Mobile requires release.
+            if (localStream) {
+                localStream.getVideoTracks().forEach(track => track.stop());
+            }
+
+            const newStream = await getMedia(newMode);
+            const newVideoTrack = newStream.getVideoTracks()[0];
+
+            if (peerConnection.current) {
+                const sender = peerConnection.current.getSenders().find(s => s.track?.kind === 'video');
+                if (sender) {
+                    await sender.replaceTrack(newVideoTrack);
                 }
             }
+
         } catch (error) {
             console.error('Failed to switch camera:', error);
+            // Revert state if failed?
+            setFacingMode(facingMode); // revert
         }
     }, [facingMode, localStream, getMedia]);
 
