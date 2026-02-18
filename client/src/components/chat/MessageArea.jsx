@@ -31,7 +31,7 @@ export default function MessageArea({ onBack, onProfileClick }) {
     const otherUser = participants.find((p) => p._id !== user._id);
 
     const chatInfo = activeChat?.isGroup ? {
-        name: activeChat.groupName,
+        name: activeChat.groupName || 'Group Chat',
         avatar: activeChat.groupAvatar,
         isGroup: true,
         onlineStatus: `${participants.length} members`
@@ -89,12 +89,13 @@ export default function MessageArea({ onBack, onProfileClick }) {
         )
         : groupedMessages;
 
-    if (!chatInfo.name && !otherUser) return null;
+    // Use fallback if name is missing but it's a valid chat (e.g. group with no name)
+    if (!chatInfo.name && !otherUser && !activeChat.isGroup) return null;
 
     return (
-        <div className="flex-1 flex flex-col h-full">
+        <div className="flex-1 flex flex-col h-full relative">
             {/* Chat Header */}
-            <div className="px-4 py-3 flex items-center justify-between flex-shrink-0 glass-panel border-b border-white/5">
+            <div className="px-4 py-3 flex items-center justify-between flex-shrink-0 glass-panel border-b border-white/5 relative z-10 bg-background/50 backdrop-blur-md min-h-[60px]">
                 <div className="flex items-center gap-3 min-w-0 flex-1 mr-2">
                     <button onClick={onBack} className="md:hidden p-1 rounded-lg hover:bg-white/5 flex-shrink-0">
                         <ArrowLeft className="w-5 h-5" />
@@ -112,7 +113,7 @@ export default function MessageArea({ onBack, onProfileClick }) {
                     </div>
 
                     <div className="min-w-0 flex-1">
-                        <h3 className="font-semibold text-sm truncate">{chatInfo.name}</h3>
+                        <h3 className="font-semibold text-sm truncate">{chatInfo.name || 'Chat'}</h3>
                         <p className="text-xs opacity-50 truncate">
                             {isTyping
                                 ? 'typing...'
