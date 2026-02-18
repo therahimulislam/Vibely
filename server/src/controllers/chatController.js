@@ -119,3 +119,57 @@ exports.togglePinChat = async (req, res) => {
         res.status(500).json({ error: 'Server error' });
     }
 };
+// DELETE /api/chats/:id - Delete chat for current user
+exports.deleteChat = async (req, res) => {
+    try {
+        const chat = await Chat.findByIdAndUpdate(
+            req.params.id,
+            { $addToSet: { deletedBy: req.userId } },
+            { new: true }
+        );
+
+        if (!chat) {
+            return res.status(404).json({ error: 'Chat not found' });
+        }
+
+        res.json({ message: 'Chat deleted' });
+    } catch (error) {
+        res.status(500).json({ error: 'Server error' });
+    }
+};
+
+// PUT /api/chats/group/add - Add user to group
+exports.addToGroup = async (req, res) => {
+    try {
+        const { chatId, userId, email } = req.body;
+        let idToAdd = userId;
+
+        if (!idToAdd && email) {
+            const user = await User.findOne({ email });
+            if (!user) {
+                return res.status(404).json({ error: 'User not found' });
+            }
+            idToAdd = user._id;
+        }
+
+        if (!idToAdd) {
+            return res.status(400).json({ error: 'User ID or Email is required' });
+        }
+
+        const chat = await Chat.findByIdAndUpdate(
+            chatId,
+            { $addToSet: { participants: idToAdd } },
+            { new: true }
+        )
+            .populate('participants', 'name email avatar isOnline lastSeen')
+            .populate('groupAdmin', 'name email avatar');
+
+        if (!chat) {
+            return res.status(404).json({ error: 'Chat not found' });
+        }
+
+        res.json({ chat });
+    } catch (error) {
+        res.status(500).json({ error: 'Server error' });
+    }
+};
