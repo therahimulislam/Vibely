@@ -11,6 +11,7 @@ const { connectRedis } = require('./config/redis');
 const { configureCloudinary } = require('./config/cloudinary');
 const { initializeSocket } = require('./sockets');
 const { initCronJobs } = require('./services/cronService');
+const { corsOrigin, allowedOrigins } = require('./config/cors');
 
 const PORT = process.env.PORT || 5000;
 
@@ -23,7 +24,7 @@ initCronJobs();
 // Initialize Socket.io
 const io = new Server(server, {
     cors: {
-        origin: process.env.CLIENT_URL || 'http://localhost:5173',
+        origin: corsOrigin,
         methods: ['GET', 'POST'],
         credentials: true,
     },
@@ -53,6 +54,7 @@ const startServer = async () => {
             console.log(`📡 API: http://localhost:${PORT}/api`);
             console.log(`🔌 WebSocket: ws://localhost:${PORT}`);
             console.log(`🏥 Health: http://localhost:${PORT}/api/health\n`);
+            console.log(`🌐 Allowed origins: ${allowedOrigins.join(', ')}`);
         });
     } catch (error) {
         console.error('Failed to start server:', error);

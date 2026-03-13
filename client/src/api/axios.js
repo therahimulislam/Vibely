@@ -2,8 +2,9 @@
 // Axios instance with JWT interceptor for auto-refresh
 
 import axios from 'axios';
+import { normalizeApiUrl } from '../utils/env';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+export const API_URL = normalizeApiUrl(import.meta.env.VITE_API_URL);
 
 const api = axios.create({
     baseURL: API_URL,

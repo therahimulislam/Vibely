@@ -18,6 +18,11 @@ import IncomingCall from './components/call/IncomingCall';
 import ManageSessions from './pages/ManageSessions';
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+const AuthProvider = ({ children }) => (
+    GOOGLE_CLIENT_ID
+        ? <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>{children}</GoogleOAuthProvider>
+        : children
+);
 
 // Protected route wrapper
 const ProtectedRoute = ({ children }) => {
@@ -99,10 +104,10 @@ export default function App() {
     window.__isDark = isDark;
 
     return (
-        <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
+        <AuthProvider>
             <Router>
                 <AppContent />
             </Router>
-        </GoogleOAuthProvider>
+        </AuthProvider>
     );
 }

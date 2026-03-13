@@ -7,8 +7,10 @@ import useAuthStore from '../store/useAuthStore';
 import useChatStore from '../store/useChatStore';
 import useCallStore from '../store/useCallStore';
 import useStatusStore from '../store/useStatusStore';
+import { API_URL } from '../api/axios';
+import { normalizeSocketUrl } from '../utils/env';
 
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
+const SOCKET_URL = normalizeSocketUrl(import.meta.env.VITE_SOCKET_URL, API_URL);
 
 let socketInstance = null;
 let socketToken = null;

@@ -24,6 +24,7 @@ const requiredVars = [
 ];
 
 const optionalVars = [
+    'CLIENT_URL',
     'GOOGLE_CLIENT_ID',
     'EMAIL_SCRIPT_URL',
     'CLOUDINARY_CLOUD_NAME',
@@ -41,6 +42,17 @@ if (missingRequired.length > 0) {
 
 if (missingOptional.length > 0) {
     console.warn(`Warning: optional environment variables missing: ${missingOptional.join(', ')}`);
+}
+
+if (process.env.CLIENT_URL) {
+    const origins = process.env.CLIENT_URL.split(',').map((value) => value.trim()).filter(Boolean);
+    if (origins.some((origin) => origin.endsWith('/'))) {
+        console.warn('Warning: CLIENT_URL contains trailing slash values. These are normalized at runtime, but trimming them is recommended.');
+    }
+}
+
+if (process.env.NODE_ENV === 'production' && !process.env.CLIENT_URL && !process.env.CLIENT_URLS) {
+    console.warn('Warning: CLIENT_URL is not set in production. Browser login requests from your frontend will usually fail due to CORS.');
 }
 
 console.log('Environment preflight passed.');

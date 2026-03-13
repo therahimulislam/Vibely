@@ -7,6 +7,7 @@ const helmet = require('helmet');
 const compression = require('compression');
 const morgan = require('morgan');
 const { apiLimiter } = require('./middleware/rateLimiter');
+const { corsOrigin } = require('./config/cors');
 
 // Import routes
 const authRoutes = require('./routes/authRoutes');
@@ -31,9 +32,9 @@ app.set('trust proxy', parseTrustProxy(process.env.TRUST_PROXY));
 // ─── Security Middleware ────────────────────────────
 app.use(helmet());
 app.use(cors({
-    origin: process.env.CLIENT_URL || 'http://localhost:5173',
+    origin: corsOrigin,
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
@@ -57,6 +58,13 @@ app.use('/api/chats', chatRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/status', statusRoutes);
 
+app.get('/', (req, res) => {
+    res.json({
+        message: 'Vibely backend is running.',
+        health: '/api/health',
+    });
+});
+
 // ─── Health Check ───────────────────────────────────
 app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -72,6 +80,9 @@ app.use((err, req, res, next) => {
     console.error('Server error:', err);
     if (err.name === 'MulterError') {
         return res.status(400).json({ error: err.message });
+    }
+    if (err.message?.includes('not allowed by CORS')) {
+        return res.status(403).json({ error: err.message });
     }
     if (err.message === 'Unsupported file type') {
         return res.status(400).json({ error: err.message });

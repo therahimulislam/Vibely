@@ -1,4 +1,4 @@
-const CACHE_NAME = 'vibely-shell-v1';
+const CACHE_NAME = 'vibely-shell-v2';
 const APP_SHELL = ['/', '/manifest.webmanifest'];
 
 self.addEventListener('install', (event) => {
@@ -23,6 +23,19 @@ self.addEventListener('fetch', (event) => {
     if (event.request.method !== 'GET') return;
     const url = new URL(event.request.url);
     if (url.pathname.startsWith('/api') || url.pathname.startsWith('/socket.io')) {
+        return;
+    }
+
+    if (event.request.mode === 'navigate') {
+        event.respondWith(
+            fetch(event.request)
+                .then((response) => {
+                    const responseClone = response.clone();
+                    caches.open(CACHE_NAME).then((cache) => cache.put('/', responseClone));
+                    return response;
+                })
+                .catch(() => caches.match('/') || Response.error())
+        );
         return;
     }
 
