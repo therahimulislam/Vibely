@@ -5,12 +5,14 @@ const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController');
 const { authenticate } = require('../middleware/auth');
-const { validateSignup, validateLogin, validateOTP } = require('../middleware/validate');
+const { validateSignup, validateLogin, validateOTP, validateResetPassword } = require('../middleware/validate');
 const { authLimiter, otpLimiter } = require('../middleware/rateLimiter');
 
 router.post('/signup', authLimiter, validateSignup, authController.signup);
 router.post('/send-otp', otpLimiter, authController.sendOTP);
+router.post('/forgot-password', otpLimiter, authController.forgotPassword);
 router.post('/verify-otp', authLimiter, validateOTP, authController.verifyOTP);
+router.post('/reset-password', authLimiter, validateResetPassword, authController.resetPassword);
 router.post('/login', authLimiter, validateLogin, authController.login);
 router.post('/google', authLimiter, authController.googleAuth);
 router.post('/refresh', authController.refreshToken);

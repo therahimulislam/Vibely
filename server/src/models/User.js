@@ -13,6 +13,16 @@ const userSchema = new mongoose.Schema(
             minlength: 2,
             maxlength: 50,
         },
+        username: {
+            type: String,
+            unique: true,
+            sparse: true,
+            trim: true,
+            lowercase: true,
+            minlength: 3,
+            maxlength: 30,
+            match: [/^[a-z0-9._]+$/, 'Username can contain lowercase letters, numbers, dots, and underscores only'],
+        },
         email: {
             type: String,
             required: [true, 'Email is required'],
@@ -50,10 +60,32 @@ const userSchema = new mongoose.Schema(
             type: Date,
             select: false,
         },
+        verificationOtp: {
+            type: String,
+            select: false,
+        },
+        verificationOtpExpiry: {
+            type: Date,
+            select: false,
+        },
+        resetOtp: {
+            type: String,
+            select: false,
+        },
+        resetOtpExpiry: {
+            type: Date,
+            select: false,
+        },
         isVerified: {
             type: Boolean,
             default: false,
         },
+        contacts: [
+            {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: 'User',
+            },
+        ],
         sessions: [
             {
                 refreshToken: String,
@@ -95,6 +127,10 @@ userSchema.methods.toJSON = function () {
     delete user.password;
     delete user.otp;
     delete user.otpExpiry;
+    delete user.verificationOtp;
+    delete user.verificationOtpExpiry;
+    delete user.resetOtp;
+    delete user.resetOtpExpiry;
     delete user.sessions;
     delete user.__v;
     return user;

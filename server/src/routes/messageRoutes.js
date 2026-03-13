@@ -10,6 +10,8 @@ const upload = require('../middleware/upload');
 router.use(authenticate);
 
 router.get('/:chatId', messageController.getMessages);
+router.post('/poll', messageController.createPoll);
+router.post('/poll/:id/vote', messageController.votePoll);
 router.post('/send', upload.single('media'), messageController.sendMessage);
 router.patch('/seen', messageController.markAsSeen);
 router.patch('/:id', messageController.editMessage);

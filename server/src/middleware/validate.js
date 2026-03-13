@@ -32,9 +32,16 @@ const validateOTP = [
     handleValidation,
 ];
 
+const validateResetPassword = [
+    body('email').trim().isEmail().withMessage('Valid email is required').normalizeEmail(),
+    body('otp').isLength({ min: 6, max: 6 }).withMessage('OTP must be 6 digits'),
+    body('newPassword').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
+    handleValidation,
+];
+
 const validateMessage = [
     body('chatId').notEmpty().withMessage('Chat ID is required'),
     handleValidation,
 ];
 
-module.exports = { validateSignup, validateLogin, validateOTP, validateMessage };
+module.exports = { validateSignup, validateLogin, validateOTP, validateResetPassword, validateMessage };

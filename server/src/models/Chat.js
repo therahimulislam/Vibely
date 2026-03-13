@@ -50,6 +50,16 @@ const chatSchema = new mongoose.Schema(
                 ref: 'User',
             },
         ],
+        requestStatus: {
+            type: String,
+            enum: ['pending', 'accepted', 'rejected'],
+            default: 'accepted',
+        },
+        requestedBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            default: null,
+        },
     },
     {
         timestamps: true,

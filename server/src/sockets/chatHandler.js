@@ -1,65 +1,109 @@
-// server/src/sockets/chatHandler.js
 // Real-time chat event handlers
 
 const Message = require('../models/Message');
 const Chat = require('../models/Chat');
 
 module.exports = (io, socket, onlineUsers) => {
-    // Send message in real-time
+    const senderFields = 'name avatar username';
+    const getChatForUser = async (chatId) => Chat.findOne({
+        _id: chatId,
+        participants: socket.userId,
+    });
+
+    const getSocketIdsForUser = (userId) => {
+        const socketIds = onlineUsers.get(userId);
+        return socketIds ? [...socketIds] : [];
+    };
+
+    const notifyChatParticipants = async (chatId, eventName, data, socketUserId) => {
+        const chat = await getChatForUser(chatId);
+        if (!chat) return;
+
+        chat.participants.forEach((participantId) => {
+            const recipientId = participantId.toString();
+            if (recipientId === socketUserId) return;
+
+            getSocketIdsForUser(recipientId).forEach((socketId) => {
+                io.to(socketId).emit(eventName, data);
+            });
+        });
+    };
+
+    const canSendInChat = (chat) => {
+        if (!chat.isGroup && chat.requestStatus === 'pending' && chat.requestedBy?.toString() !== socket.userId) {
+            return 'Accept this chat request before replying';
+        }
+
+        if (!chat.isGroup && chat.requestStatus === 'rejected') {
+            return 'This chat request has been rejected';
+        }
+
+        return null;
+    };
+
     socket.on('sendMessage', async (data) => {
         try {
-            const { chatId, text, imageUrl, videoUrl, tempId } = data;
+            const { chatId, text, tempId } = data;
+            const normalizedText = typeof text === 'string' ? text.trim() : '';
+            const chat = await getChatForUser(chatId);
 
-            // Create message
+            if (!chat) {
+                socket.emit('messageError', { error: 'Access denied' });
+                return;
+            }
+
+            const sendError = canSendInChat(chat);
+            if (sendError) {
+                socket.emit('messageError', { error: sendError });
+                return;
+            }
+
+            if (!normalizedText) {
+                socket.emit('messageError', { error: 'Message must have text or media' });
+                return;
+            }
+
             const message = await Message.create({
                 chatId,
                 senderId: socket.userId,
-                text: text || '',
-                imageUrl: imageUrl || '',
-                videoUrl: videoUrl || '',
+                text: normalizedText,
                 status: 'sent',
             });
 
-            // Update chat
-            const chat = await Chat.findById(chatId);
-            if (chat) {
-                chat.lastMessage = message._id;
-                chat.updatedAt = new Date();
+            chat.lastMessage = message._id;
+            chat.updatedAt = new Date();
 
-                chat.participants.forEach((pId) => {
-                    if (pId.toString() !== socket.userId) {
-                        const count = chat.unreadCount.get(pId.toString()) || 0;
-                        chat.unreadCount.set(pId.toString(), count + 1);
-                    }
+            chat.participants.forEach((participantId) => {
+                if (participantId.toString() !== socket.userId) {
+                    const count = chat.unreadCount.get(participantId.toString()) || 0;
+                    chat.unreadCount.set(participantId.toString(), count + 1);
+                }
+            });
+
+            await chat.save();
+
+            const populated = await Message.findById(message._id).populate('senderId', senderFields);
+
+            let delivered = false;
+            chat.participants.forEach((participantId) => {
+                const recipientId = participantId.toString();
+                if (recipientId === socket.userId) return;
+
+                getSocketIdsForUser(recipientId).forEach((socketId) => {
+                    delivered = true;
+                    io.to(socketId).emit('receiveMessage', {
+                        message: populated,
+                        chatId,
+                    });
                 });
+            });
 
-                await chat.save();
+            if (delivered) {
+                message.status = 'delivered';
+                await message.save();
+                populated.status = 'delivered';
             }
 
-            const populated = await Message.findById(message._id).populate('senderId', 'name avatar');
-
-            // Send to all participants in the chat
-            if (chat) {
-                chat.participants.forEach((pId) => {
-                    const recipientId = pId.toString();
-                    if (recipientId !== socket.userId) {
-                        const recipientSocketId = onlineUsers.get(recipientId);
-                        if (recipientSocketId) {
-                            // Deliver to online recipient
-                            io.to(recipientSocketId).emit('receiveMessage', {
-                                message: populated,
-                                chatId,
-                            });
-
-                            // Mark as delivered
-                            message.status = 'delivered';
-                            message.save();
-                        }
-                    }
-                });
-            }
-
-            // Confirm to sender
             socket.emit('messageSent', {
                 message: populated,
                 tempId,
@@ -70,26 +114,34 @@ module.exports = (io, socket, onlineUsers) => {
         }
     });
 
-    // Typing indicator
     socket.on('typing', ({ chatId }) => {
-        notifyChatParticipants(chatId, 'userTyping', {
-            chatId,
-            userId: socket.userId,
-        }, socket.userId);
+        getChatForUser(chatId).then((chat) => {
+            if (!chat) return;
+            if (!chat.isGroup && chat.requestStatus === 'pending' && chat.requestedBy?.toString() !== socket.userId) {
+                return;
+            }
+            notifyChatParticipants(chatId, 'userTyping', {
+                chatId,
+                userId: socket.userId,
+            }, socket.userId);
+        });
     });
 
-    // Stop typing
     socket.on('stopTyping', ({ chatId }) => {
-        notifyChatParticipants(chatId, 'userStopTyping', {
-            chatId,
-            userId: socket.userId,
-        }, socket.userId);
+        getChatForUser(chatId).then((chat) => {
+            if (!chat) return;
+            notifyChatParticipants(chatId, 'userStopTyping', {
+                chatId,
+                userId: socket.userId,
+            }, socket.userId);
+        });
     });
 
-    // Message seen
     socket.on('messageSeen', async ({ chatId, senderId }) => {
         try {
-            // Update all unseen messages from sender in this chat
+            const chat = await getChatForUser(chatId);
+            if (!chat) return;
+
             await Message.updateMany(
                 {
                     chatId,
@@ -99,58 +151,37 @@ module.exports = (io, socket, onlineUsers) => {
                 { status: 'seen' }
             );
 
-            // Reset unread count
-            const chat = await Chat.findById(chatId);
-            if (chat) {
-                chat.unreadCount.set(socket.userId, 0);
-                await chat.save();
-            }
+            chat.unreadCount.set(socket.userId, 0);
+            await chat.save();
 
-            // Notify sender that messages were seen
-            const senderSocketId = onlineUsers.get(senderId);
-            if (senderSocketId) {
-                io.to(senderSocketId).emit('messagesSeen', {
+            getSocketIdsForUser(senderId).forEach((socketId) => {
+                io.to(socketId).emit('messagesSeen', {
                     chatId,
                     seenBy: socket.userId,
                 });
-            }
+            });
         } catch (error) {
             console.error('Message seen error:', error);
         }
     });
 
-    // Helper to notify all participants
-    const notifyChatParticipants = async (chatId, eventName, data, socketUserId) => {
-        const chat = await Chat.findById(chatId);
-        if (!chat) return;
-
-        chat.participants.forEach((pId) => {
-            const recipientId = pId.toString();
-            if (recipientId !== socketUserId) {
-                const recipientSocketId = onlineUsers.get(recipientId);
-                if (recipientSocketId) {
-                    io.to(recipientSocketId).emit(eventName, data);
-                }
-            }
-        });
-    };
-
-    // Message reaction
     socket.on('messageReaction', async ({ messageId, emoji }) => {
         try {
             const message = await Message.findById(messageId);
             if (!message) return;
 
-            // Toggle reaction
+            const chat = await getChatForUser(message.chatId);
+            if (!chat) return;
+
             const existingIndex = message.reactions.findIndex(
-                (r) => r.userId.toString() === socket.userId && r.emoji === emoji
+                (reaction) => reaction.userId.toString() === socket.userId && reaction.emoji === emoji
             );
 
             if (existingIndex > -1) {
                 message.reactions.splice(existingIndex, 1);
             } else {
                 message.reactions = message.reactions.filter(
-                    (r) => r.userId.toString() !== socket.userId
+                    (reaction) => reaction.userId.toString() !== socket.userId
                 );
                 message.reactions.push({ userId: socket.userId, emoji });
             }
@@ -158,62 +189,71 @@ module.exports = (io, socket, onlineUsers) => {
             await message.save();
 
             const populated = await Message.findById(messageId)
-                .populate('senderId', 'name avatar')
+                .populate('senderId', senderFields)
                 .populate('reactions.userId', 'name');
 
-            // Notify sender
             socket.emit('messageUpdated', { message: populated });
-
-            // Notify others
             await notifyChatParticipants(message.chatId, 'messageUpdated', { message: populated }, socket.userId);
-
         } catch (error) {
             console.error('Reaction error:', error);
         }
     });
 
-    // Message delete
     socket.on('deleteMessage', async ({ messageId, chatId, type }) => {
         try {
             const message = await Message.findById(messageId);
             if (!message) return;
+
+            const activeChatId = chatId || message.chatId;
+            const chat = await getChatForUser(activeChatId);
+            if (!chat) return;
 
             if (type === 'everyone') {
                 if (message.senderId.toString() !== socket.userId) return;
 
                 message.isDeleted = true;
                 message.text = '';
-                message.imageUrl = '';
-                message.videoUrl = '';
-                message.fileUrl = ''; // Also clear file
+                message.fileUrl = '';
+                message.fileName = '';
+                message.fileSize = 0;
+                message.publicId = '';
                 await message.save();
 
-                socket.emit('messageDeleted', { messageId, chatId, type: 'everyone' });
-                await notifyChatParticipants(chatId, 'messageDeleted', { messageId, chatId, type: 'everyone' }, socket.userId);
-            } else {
-                // Delete for me
-                if (!message.deletedFor.includes(socket.userId)) {
-                    message.deletedFor.push(socket.userId);
-                    await message.save();
-                }
-                socket.emit('messageDeleted', { messageId, chatId, type: 'me' });
+                socket.emit('messageDeleted', { messageId, chatId: activeChatId, type: 'everyone' });
+                await notifyChatParticipants(activeChatId, 'messageDeleted', { messageId, chatId: activeChatId, type: 'everyone' }, socket.userId);
+                return;
             }
+
+            if (!message.deletedFor.includes(socket.userId)) {
+                message.deletedFor.push(socket.userId);
+                await message.save();
+            }
+
+            socket.emit('messageDeleted', { messageId, chatId: activeChatId, type: 'me' });
         } catch (error) {
             console.error('Delete error:', error);
         }
     });
 
-    // Message edit
     socket.on('editMessage', async ({ messageId, text }) => {
         try {
             const message = await Message.findById(messageId);
             if (!message || message.senderId.toString() !== socket.userId) return;
 
-            message.text = text;
+            const chat = await getChatForUser(message.chatId);
+            if (!chat) return;
+
+            const fifteenMinutes = 15 * 60 * 1000;
+            if (Date.now() - message.createdAt.getTime() > fifteenMinutes) {
+                socket.emit('messageError', { error: 'Can only edit messages within 15 minutes' });
+                return;
+            }
+
+            message.text = typeof text === 'string' ? text.trim() : '';
             message.isEdited = true;
             await message.save();
 
-            const populated = await Message.findById(messageId).populate('senderId', 'name avatar');
+            const populated = await Message.findById(messageId).populate('senderId', senderFields);
 
             socket.emit('messageUpdated', { message: populated });
             await notifyChatParticipants(message.chatId, 'messageUpdated', { message: populated }, socket.userId);

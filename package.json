@@ -7,7 +7,11 @@
     "dev:client": "cd client && npm run dev",
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "install:all": "cd server && npm install && cd ../client && npm install",
-    "build:client": "cd client && npm run build"
+    "build:client": "cd client && npm run build",
+    "check:env": "node server/src/scripts/checkEnv.js",
+    "check:server": "find server/src -name '*.js' -print0 | xargs -0 -n1 node --check",
+    "check:client": "cd client && npm run build",
+    "verify": "npm run check:env && npm run check:server && npm run check:client"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"

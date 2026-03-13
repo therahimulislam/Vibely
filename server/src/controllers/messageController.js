@@ -5,6 +5,54 @@ const Message = require('../models/Message');
 const Chat = require('../models/Chat');
 const { uploadFile } = require('../services/cloudinaryService');
 const fs = require('fs');
+const { randomUUID } = require('crypto');
+
+const MESSAGE_SENDER_FIELDS = 'name avatar username';
+const cleanupTempFile = (filePath) => {
+    if (filePath) {
+        fs.unlink(filePath, () => { });
+    }
+};
+
+const populateMessage = (messageId) => Message.findById(messageId)
+    .populate('senderId', MESSAGE_SENDER_FIELDS)
+    .populate('reactions.userId', 'name');
+
+const updateChatAfterMessage = async (chat, senderId, messageId) => {
+    chat.lastMessage = messageId;
+    chat.updatedAt = new Date();
+    chat.deletedBy = [];
+
+    chat.participants.forEach((participantId) => {
+        if (participantId.toString() !== senderId.toString()) {
+            const count = chat.unreadCount.get(participantId.toString()) || 0;
+            chat.unreadCount.set(participantId.toString(), count + 1);
+        }
+    });
+
+    await chat.save();
+};
+
+const emitToChatParticipants = (req, chat, eventName, payload, senderId) => {
+    const io = req.app.get('io');
+    if (!io) return;
+
+    chat.participants.forEach((participantId) => {
+        const userId = participantId.toString();
+        if (senderId && userId === senderId.toString()) return;
+        io.to(`user:${userId}`).emit(eventName, payload);
+    });
+};
+
+const ensureDirectChatCanSend = (chat, actorId) => {
+    if (!chat.isGroup && chat.requestStatus === 'pending' && chat.requestedBy?.toString() !== actorId.toString()) {
+        throw Object.assign(new Error('Accept this chat request before replying'), { statusCode: 403 });
+    }
+
+    if (!chat.isGroup && chat.requestStatus === 'rejected') {
+        throw Object.assign(new Error('This chat request has been rejected'), { statusCode: 403 });
+    }
+};
 
 // GET /api/messages/:chatId - Get messages with pagination
 exports.getMessages = async (req, res) => {
@@ -24,6 +72,14 @@ exports.getMessages = async (req, res) => {
             return res.status(403).json({ error: 'Access denied' });
         }
 
+        if (!chat.isGroup && chat.requestStatus === 'pending' && chat.requestedBy?.toString() !== req.userId.toString()) {
+            return res.status(403).json({ error: 'Accept this chat request before replying' });
+        }
+
+        if (!chat.isGroup && chat.requestStatus === 'rejected') {
+            return res.status(403).json({ error: 'This chat request has been rejected' });
+        }
+
         const messages = await Message.find({
             chatId,
             deletedFor: { $ne: req.userId }, // Exclude deleted-for-me messages
@@ -31,19 +87,22 @@ exports.getMessages = async (req, res) => {
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limit)
-            .populate('senderId', 'name avatar')
+            .populate('senderId', MESSAGE_SENDER_FIELDS)
             .populate('reactions.userId', 'name');
 
-        const total = await Message.countDocuments({ chatId });
+        const visibleTotal = await Message.countDocuments({
+            chatId,
+            deletedFor: { $ne: req.userId },
+        });
 
         res.json({
             messages: messages.reverse(),
             pagination: {
                 page,
                 limit,
-                total,
-                pages: Math.ceil(total / limit),
-                hasMore: skip + limit < total,
+                total: visibleTotal,
+                pages: Math.ceil(visibleTotal / limit),
+                hasMore: skip + limit < visibleTotal,
             },
         });
     } catch (error) {
@@ -55,9 +114,7 @@ exports.getMessages = async (req, res) => {
 exports.sendMessage = async (req, res) => {
     try {
         const { chatId, text } = req.body;
-        let imageUrl = '';
-        let videoUrl = '';
-
+        const normalizedText = typeof text === 'string' ? text.trim() : '';
         // Verify user is participant
         const chat = await Chat.findOne({
             _id: chatId,
@@ -67,6 +124,8 @@ exports.sendMessage = async (req, res) => {
         if (!chat) {
             return res.status(403).json({ error: 'Access denied' });
         }
+
+        ensureDirectChatCanSend(chat, req.userId);
 
         // Handle file upload
         let fileData = {
@@ -99,48 +158,33 @@ exports.sendMessage = async (req, res) => {
             }
             // If isDocumentMode is true, it stays 'document' (default)
 
-            // Cleanup
-            fs.unlink(req.file.path, () => { });
         }
 
-        if (!text && !fileData.fileUrl) {
+        if (!normalizedText && !fileData.fileUrl) {
             return res.status(400).json({ error: 'Message must have text or media' });
         }
 
         const message = await Message.create({
             chatId,
             senderId: req.userId,
-            text: text || '',
+            text: normalizedText,
             ...fileData,
             status: 'sent',
         });
 
-        // Update chat's last message, increment unread counts, and restore chat for all
-        const updateOperation = {
-            lastMessage: message._id,
-            updatedAt: new Date(),
-            $set: { deletedBy: [] }
-        };
+        await updateChatAfterMessage(chat, req.userId, message._id);
 
-        // Initialize $inc operator for unread counts
-        const incUpdates = {};
-        chat.participants.forEach((pId) => {
-            if (pId.toString() !== req.userId.toString()) {
-                incUpdates[`unreadCount.${pId}`] = 1;
-            }
-        });
-
-        if (Object.keys(incUpdates).length > 0) {
-            updateOperation['$inc'] = incUpdates;
-        }
-
-        await Chat.findByIdAndUpdate(chatId, updateOperation);
-
-        const populatedMessage = await Message.findById(message._id).populate('senderId', 'name avatar');
+        const populatedMessage = await populateMessage(message._id);
+        emitToChatParticipants(req, chat, 'receiveMessage', {
+            message: populatedMessage,
+            chatId,
+        }, req.userId);
 
         res.status(201).json({ message: populatedMessage });
     } catch (error) {
-        res.status(500).json({ error: 'Server error' });
+        res.status(error.statusCode || 500).json({ error: error.message || 'Server error' });
+    } finally {
+        cleanupTempFile(req.file?.path);
     }
 };
 
@@ -148,6 +192,14 @@ exports.sendMessage = async (req, res) => {
 exports.markAsSeen = async (req, res) => {
     try {
         const { chatId } = req.body;
+        const chat = await Chat.findOne({
+            _id: chatId,
+            participants: req.userId,
+        });
+
+        if (!chat) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
 
         await Message.updateMany(
             {
@@ -159,11 +211,8 @@ exports.markAsSeen = async (req, res) => {
         );
 
         // Reset unread count
-        const chat = await Chat.findById(chatId);
-        if (chat) {
-            chat.unreadCount.set(req.userId.toString(), 0);
-            await chat.save();
-        }
+        chat.unreadCount.set(req.userId.toString(), 0);
+        await chat.save();
 
         res.json({ success: true });
     } catch (error) {
@@ -189,11 +238,11 @@ exports.editMessage = async (req, res) => {
             return res.status(400).json({ error: 'Can only edit messages within 15 minutes' });
         }
 
-        message.text = req.body.text;
+        message.text = typeof req.body.text === 'string' ? req.body.text.trim() : '';
         message.isEdited = true;
         await message.save();
 
-        const populated = await Message.findById(message._id).populate('senderId', 'name avatar');
+        const populated = await Message.findById(message._id).populate('senderId', MESSAGE_SENDER_FIELDS);
         res.json({ message: populated });
     } catch (error) {
         res.status(500).json({ error: 'Server error' });
@@ -216,8 +265,11 @@ exports.deleteMessage = async (req, res) => {
             }
             message.isDeleted = true;
             message.text = '';
-            message.imageUrl = '';
-            message.videoUrl = '';
+            message.fileUrl = '';
+            message.fileName = '';
+            message.fileSize = 0;
+            message.publicId = '';
+            message.poll = { question: '', options: [] };
             await message.save();
         } else {
             // Delete for me (default)
@@ -243,28 +295,139 @@ exports.addReaction = async (req, res) => {
             return res.status(404).json({ error: 'Message not found' });
         }
 
-        // Remove existing reaction from this user
-        message.reactions = message.reactions.filter(
-            (r) => r.userId.toString() !== req.userId.toString()
-        );
+        const chat = await Chat.findOne({
+            _id: message.chatId,
+            participants: req.userId,
+        });
 
-        // Add new reaction (or toggle off if same emoji)
+        if (!chat) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+
         const existingReaction = message.reactions.find(
-            (r) => r.userId.toString() === req.userId.toString() && r.emoji === emoji
+            (r) => r.userId.toString() === req.userId.toString()
         );
 
-        if (!existingReaction) {
+        if (existingReaction?.emoji === emoji) {
+            message.reactions = message.reactions.filter(
+                (r) => r.userId.toString() !== req.userId.toString()
+            );
+        } else {
+            message.reactions = message.reactions.filter(
+                (r) => r.userId.toString() !== req.userId.toString()
+            );
             message.reactions.push({ userId: req.userId, emoji });
         }
 
         await message.save();
 
         const populated = await Message.findById(message._id)
-            .populate('senderId', 'name avatar')
+            .populate('senderId', MESSAGE_SENDER_FIELDS)
             .populate('reactions.userId', 'name');
 
         res.json({ message: populated });
     } catch (error) {
+        res.status(500).json({ error: 'Server error' });
+    }
+};
+
+// POST /api/messages/poll - Create a poll in a group chat
+exports.createPoll = async (req, res) => {
+    try {
+        const { chatId, question, options = [] } = req.body;
+
+        const chat = await Chat.findOne({
+            _id: chatId,
+            participants: req.userId,
+            isGroup: true,
+        });
+
+        if (!chat) {
+            return res.status(403).json({ error: 'Only group members can create polls' });
+        }
+
+        const normalizedQuestion = question?.trim();
+        const normalizedOptions = options
+            .map((option) => option?.trim())
+            .filter(Boolean)
+            .slice(0, 10);
+
+        if (!normalizedQuestion) {
+            return res.status(400).json({ error: 'Poll question is required' });
+        }
+
+        if (normalizedOptions.length < 2) {
+            return res.status(400).json({ error: 'Add at least two poll options' });
+        }
+
+        const message = await Message.create({
+            chatId,
+            senderId: req.userId,
+            type: 'poll',
+            poll: {
+                question: normalizedQuestion,
+                options: normalizedOptions.map((option) => ({
+                    optionId: randomUUID(),
+                    text: option,
+                    votes: [],
+                })),
+            },
+            status: 'sent',
+        });
+
+        await updateChatAfterMessage(chat, req.userId, message._id);
+        const populatedMessage = await populateMessage(message._id);
+
+        emitToChatParticipants(req, chat, 'receiveMessage', {
+            message: populatedMessage,
+            chatId,
+        }, req.userId);
+
+        res.status(201).json({ message: populatedMessage });
+    } catch (error) {
+        console.error('Create poll error:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
+};
+
+// POST /api/messages/poll/:id/vote - Vote on a poll
+exports.votePoll = async (req, res) => {
+    try {
+        const { optionId } = req.body;
+        const message = await Message.findById(req.params.id);
+
+        if (!message || message.type !== 'poll') {
+            return res.status(404).json({ error: 'Poll not found' });
+        }
+
+        const chat = await Chat.findOne({
+            _id: message.chatId,
+            participants: req.userId,
+            isGroup: true,
+        });
+
+        if (!chat) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+
+        const selectedOption = message.poll.options.find((option) => option.optionId === optionId);
+        if (!selectedOption) {
+            return res.status(400).json({ error: 'Invalid poll option' });
+        }
+
+        message.poll.options.forEach((option) => {
+            option.votes = option.votes.filter((vote) => vote.toString() !== req.userId.toString());
+        });
+        selectedOption.votes.push(req.userId);
+
+        await message.save();
+
+        const populatedMessage = await populateMessage(message._id);
+        emitToChatParticipants(req, chat, 'messageUpdated', { message: populatedMessage }, null);
+
+        res.json({ message: populatedMessage });
+    } catch (error) {
+        console.error('Vote poll error:', error);
         res.status(500).json({ error: 'Server error' });
     }
 };

@@ -44,6 +44,12 @@ api.interceptors.response.use(
             }
         }
 
+        if (error.response?.status === 401 && error.response?.data?.code === 'SESSION_REVOKED') {
+            localStorage.removeItem('accessToken');
+            localStorage.removeItem('refreshToken');
+            window.location.href = '/login';
+        }
+
         return Promise.reject(error);
     }
 );

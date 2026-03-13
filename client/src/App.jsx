@@ -10,6 +10,7 @@ import useSocket from './hooks/useSocket';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import VerifyOTP from './pages/VerifyOTP';
+import ForgotPassword from './pages/ForgotPassword';
 import Chat from './pages/Chat';
 import VideoCall from './components/call/VideoCall';
 import IncomingCall from './components/call/IncomingCall';
@@ -49,6 +50,7 @@ function AppContent() {
                 <Route path="/login" element={<AuthRoute><Login /></AuthRoute>} />
                 <Route path="/signup" element={<AuthRoute><Signup /></AuthRoute>} />
                 <Route path="/verify-otp" element={<VerifyOTP />} />
+                <Route path="/forgot-password" element={<AuthRoute><ForgotPassword /></AuthRoute>} />
                 <Route path="/" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
                 <Route path="/settings/sessions" element={<ProtectedRoute><ManageSessions /></ProtectedRoute>} />
                 <Route path="*" element={<Navigate to="/" replace />} />

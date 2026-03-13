@@ -3,20 +3,28 @@
 
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Plus, Settings, LogOut, Sun, Moon, MessageCircle, X, Users, UserPlus, Check } from 'lucide-react';
+import { Search, Plus, Settings, LogOut, Sun, Moon, MessageCircle, X, Users, UserPlus, Check, UserRoundPlus, UserRoundMinus } from 'lucide-react';
 import useAuthStore from '../../store/useAuthStore';
 import useChatStore from '../../store/useChatStore';
+import useStatusStore from '../../store/useStatusStore';
 import ChatList from '../chat/ChatList';
+import StatusStrip from '../status/StatusStrip';
+import StatusComposerModal from '../status/StatusComposerModal';
+import StatusViewer from '../status/StatusViewer';
 import SearchBar from '../ui/SearchBar';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 
 export default function Sidebar({ onProfileClick }) {
     const navigate = useNavigate();
-    const { user, logout } = useAuthStore();
+    const { user, logout, addContact, removeContact } = useAuthStore();
     const { searchQuery, setSearchQuery, createChat, fetchChats, error } = useChatStore();
+    const { myStatuses, statuses, fetchStatuses, isLoading: isLoadingStatuses } = useStatusStore();
     const [showNewChat, setShowNewChat] = useState(false);
     const [showNewGroup, setShowNewGroup] = useState(false);
+    const [showStatusComposer, setShowStatusComposer] = useState(false);
+    const [isOwnStatusGroup, setIsOwnStatusGroup] = useState(false);
+    const [activeStatusUserId, setActiveStatusUserId] = useState(null);
     const [groupName, setGroupName] = useState('');
     const [selectedUsers, setSelectedUsers] = useState([]);
     const [searchUsers, setSearchUsers] = useState([]);
@@ -30,6 +38,10 @@ export default function Sidebar({ onProfileClick }) {
             toast.error(error);
         }
     }, [error]);
+
+    useEffect(() => {
+        fetchStatuses();
+    }, [fetchStatuses]);
 
     // Search users for new chat
     useEffect(() => {
@@ -98,11 +110,39 @@ export default function Sidebar({ onProfileClick }) {
         }
     };
 
+    const handleToggleContact = async (targetUser) => {
+        try {
+            if (targetUser.isContact) {
+                await removeContact(targetUser._id);
+                setSearchUsers((prev) => prev.map((entry) => entry._id === targetUser._id ? { ...entry, isContact: false } : entry));
+                toast.success('Contact removed');
+            } else {
+                await addContact(targetUser._id);
+                setSearchUsers((prev) => prev.map((entry) => entry._id === targetUser._id ? { ...entry, isContact: true } : entry));
+                toast.success('Contact saved');
+            }
+            fetchStatuses();
+        } catch (error) {
+            toast.error(error.message);
+        }
+    };
+
+    const handleOpenStatusGroup = (group, isOwn = false) => {
+        setActiveStatusUserId(group?.user?._id || null);
+        setIsOwnStatusGroup(isOwn);
+    };
+
+    const activeStatusGroup = activeStatusUserId
+        ? (isOwnStatusGroup
+            ? myStatuses
+            : statuses.find((group) => group.user._id === activeStatusUserId) || null)
+        : null;
+
     return (
-        <div className="w-full h-full flex flex-col glass-panel border-r border-white/5 dark:border-white/5">
+        <div className="w-full h-full min-w-0 flex flex-col glass-panel border-r border-white/5 dark:border-white/5">
             {/* Header */}
-            <div className="p-4 flex items-center justify-between flex-shrink-0">
-                <div className="flex items-center gap-3">
+            <div className="p-3 sm:p-4 flex items-center justify-between gap-3 flex-shrink-0">
+                <div className="flex items-center gap-3 min-w-0">
                     <div
                         onClick={onProfileClick}
                         className="w-10 h-10 rounded-full overflow-hidden cursor-pointer ring-2 ring-primary-500/30 hover:ring-primary-500/60 transition-all"
@@ -116,13 +156,13 @@ export default function Sidebar({ onProfileClick }) {
                             </div>
                         )}
                     </div>
-                    <div>
-                        <h2 className="font-semibold text-sm">{user?.name}</h2>
+                    <div className="min-w-0">
+                        <h2 className="font-semibold text-sm truncate">{user?.name}</h2>
                         <p className="text-xs opacity-40">Online</p>
                     </div>
                 </div>
 
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-0.5 sm:gap-1 flex-shrink-0">
                     <button
                         onClick={() => navigate('/settings/sessions')}
                         className="p-2 rounded-xl hover:bg-white/5 transition-colors"
@@ -155,7 +195,7 @@ export default function Sidebar({ onProfileClick }) {
             </div>
 
             {/* Search chats */}
-            <div className="px-4 pb-3 flex-shrink-0">
+            <div className="px-3 sm:px-4 pb-3 flex-shrink-0">
                 <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 opacity-30" />
                     <input
@@ -168,9 +208,18 @@ export default function Sidebar({ onProfileClick }) {
                 </div>
             </div>
 
+            <StatusStrip
+                user={user}
+                myStatuses={myStatuses}
+                statuses={statuses}
+                isLoading={isLoadingStatuses}
+                onCreate={() => setShowStatusComposer(true)}
+                onOpenGroup={handleOpenStatusGroup}
+            />
+
             {/* New Chat / Group Panel */}
             {(showNewChat || showNewGroup) && (
-                <div className="px-4 pb-3 flex-shrink-0 animate-slide-up">
+                <div className="px-3 sm:px-4 pb-3 flex-shrink-0 animate-slide-up">
                     <div className="glass-card p-3">
                         <div className="flex items-center justify-between mb-2">
                             <h3 className="text-sm font-semibold flex items-center gap-2">
@@ -217,7 +266,7 @@ export default function Sidebar({ onProfileClick }) {
                             type="text"
                             value={userSearchQuery}
                             onChange={(e) => setUserSearchQuery(e.target.value)}
-                            placeholder="Search users..."
+                            placeholder="Search by username..."
                             className="input-glass py-2 text-sm mb-2"
                             autoFocus
                         />
@@ -226,31 +275,46 @@ export default function Sidebar({ onProfileClick }) {
                             {searchUsers.map((u) => {
                                 const isSelected = selectedUsers.find(sel => sel._id === u._id);
                                 return (
-                                    <button
+                                    <div
                                         key={u._id}
-                                        onClick={() => showNewGroup ? toggleUserSelection(u) : handleStartChat(u._id)}
-                                        className={`w-full flex items-center gap-3 p-2 rounded-xl transition-colors text-left ${isSelected ? 'bg-primary-500/20' : 'hover:bg-white/5'}`}
+                                        className={`w-full flex items-center gap-2 sm:gap-3 p-2 rounded-xl transition-colors text-left ${isSelected ? 'bg-primary-500/20' : 'hover:bg-white/5'}`}
                                     >
-                                        <div className="w-9 h-9 rounded-full overflow-hidden flex-shrink-0 relative">
-                                            {u.avatar ? (
-                                                <img src={u.avatar} alt={u.name} className="w-full h-full object-cover" />
-                                            ) : (
-                                                <div className="w-full h-full flex items-center justify-center text-white text-sm font-bold"
-                                                    style={{ background: 'var(--gradient-accent)' }}>
-                                                    {u.name[0].toUpperCase()}
-                                                </div>
-                                            )}
-                                            {isSelected && (
-                                                <div className="absolute inset-0 bg-primary-500/60 flex items-center justify-center">
-                                                    <Check className="w-5 h-5 text-white" />
-                                                </div>
-                                            )}
-                                        </div>
-                                        <div className="min-w-0">
-                                            <p className="text-sm font-medium truncate">{u.name}</p>
-                                            <p className="text-xs opacity-40 truncate">{u.email}</p>
-                                        </div>
-                                    </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => showNewGroup ? toggleUserSelection(u) : handleStartChat(u._id)}
+                                            className="flex items-center gap-3 text-left flex-1 min-w-0"
+                                        >
+                                            <div className="w-9 h-9 rounded-full overflow-hidden flex-shrink-0 relative">
+                                                {u.avatar ? (
+                                                    <img src={u.avatar} alt={u.name} className="w-full h-full object-cover" />
+                                                ) : (
+                                                    <div className="w-full h-full flex items-center justify-center text-white text-sm font-bold"
+                                                        style={{ background: 'var(--gradient-accent)' }}>
+                                                        {u.name[0].toUpperCase()}
+                                                    </div>
+                                                )}
+                                                {isSelected && (
+                                                    <div className="absolute inset-0 bg-primary-500/60 flex items-center justify-center">
+                                                        <Check className="w-5 h-5 text-white" />
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <div className="min-w-0">
+                                                <p className="text-sm font-medium truncate">{u.name}</p>
+                                                <p className="text-xs opacity-40 truncate">@{u.username}</p>
+                                            </div>
+                                        </button>
+                                        {!showNewGroup && (
+                                            <button
+                                                type="button"
+                                                onClick={() => handleToggleContact(u)}
+                                                className="p-2 rounded-lg hover:bg-white/10 flex-shrink-0"
+                                                title={u.isContact ? 'Remove contact' : 'Add contact'}
+                                            >
+                                                {u.isContact ? <UserRoundMinus className="w-4 h-4 text-red-300" /> : <UserRoundPlus className="w-4 h-4 text-primary-300" />}
+                                            </button>
+                                        )}
+                                    </div>
                                 )
                             })}
                         </div>
@@ -271,6 +335,18 @@ export default function Sidebar({ onProfileClick }) {
             <div className="flex-1 overflow-y-auto">
                 <ChatList />
             </div>
+
+            {showStatusComposer && (
+                <StatusComposerModal onClose={() => setShowStatusComposer(false)} />
+            )}
+
+            {activeStatusGroup && (
+                <StatusViewer
+                    group={activeStatusGroup}
+                    isOwn={isOwnStatusGroup}
+                    onClose={() => setActiveStatusUserId(null)}
+                />
+            )}
         </div>
     );
 }

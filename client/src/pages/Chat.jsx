@@ -31,9 +31,9 @@ export default function Chat() {
     };
 
     return (
-        <div className="h-screen flex overflow-hidden">
+        <div className="h-[100dvh] min-h-screen flex overflow-hidden">
             {/* Sidebar */}
-            <div className={`${showSidebar ? 'flex' : 'hidden'} md:flex w-full md:w-[380px] lg:w-[420px] flex-shrink-0`}>
+            <div className={`${showSidebar ? 'flex' : 'hidden'} md:flex w-full md:w-[340px] lg:w-[400px] xl:w-[420px] flex-shrink-0 min-w-0`}>
                 <ErrorBoundary>
                     <Sidebar onProfileClick={() => setShowProfile(true)} />
                 </ErrorBoundary>

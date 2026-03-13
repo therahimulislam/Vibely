@@ -2,10 +2,22 @@
 // Chat and messaging state management
 
 import { create } from 'zustand';
+import toast from 'react-hot-toast';
 import api from '../api/axios';
+
+const typingTimeouts = {};
 
 const useChatStore = create((set, get) => ({
     chats: [],
+    activeChat: null,
+    messages: [],
+    typingUsers: {},
+    onlineUsers: new Set(),
+    searchQuery: '',
+    isLoadingChats: false,
+    isLoadingMessages: false,
+    hasMoreMessages: false,
+    currentPage: 1,
     error: null,
 
     // Fetch all chats for current user
@@ -170,9 +182,9 @@ const useChatStore = create((set, get) => ({
     },
 
     // Add user to group
-    addToGroup: async (chatId, userId, email) => {
+    addToGroup: async (chatId, userId, username) => {
         try {
-            const { data } = await api.put('/chats/group/add', { chatId, userId, email });
+            const { data } = await api.put('/chats/group/add', { chatId, userId, username });
             set((state) => ({
                 chats: state.chats.map((c) => (c._id === chatId ? data.chat : c)),
                 activeChat: state.activeChat?._id === chatId ? data.chat : state.activeChat,
@@ -186,12 +198,24 @@ const useChatStore = create((set, get) => ({
 
     // Typing indicators
     setTyping: (chatId, userId) => {
+        if (typingTimeouts[chatId]) {
+            clearTimeout(typingTimeouts[chatId]);
+        }
+        typingTimeouts[chatId] = setTimeout(() => {
+            get().clearTyping(chatId);
+        }, 3000);
+
         set((state) => ({
             typingUsers: { ...state.typingUsers, [chatId]: userId },
         }));
     },
 
     clearTyping: (chatId) => {
+        if (typingTimeouts[chatId]) {
+            clearTimeout(typingTimeouts[chatId]);
+            delete typingTimeouts[chatId];
+        }
+
         set((state) => {
             const { [chatId]: _, ...rest } = state.typingUsers;
             return { typingUsers: rest };
@@ -207,6 +231,10 @@ const useChatStore = create((set, get) => ({
         });
     },
 
+    setOnlineUsers: (userIds = []) => {
+        set({ onlineUsers: new Set(userIds) });
+    },
+
     setUserOffline: (userId) => {
         set((state) => {
             const newSet = new Set(state.onlineUsers);
@@ -218,13 +246,59 @@ const useChatStore = create((set, get) => ({
     // Search
     setSearchQuery: (query) => set({ searchQuery: query }),
 
+    respondToRequest: async (chatId, action) => {
+        try {
+            const { data } = await api.patch(`/chats/${chatId}/request`, { action });
+            set((state) => {
+                const chats = action === 'reject'
+                    ? state.chats.filter((chat) => chat._id !== chatId)
+                    : state.chats.map((chat) => chat._id === chatId ? data.chat : chat);
+
+                return {
+                    chats,
+                    activeChat: action === 'reject'
+                        ? (state.activeChat?._id === chatId ? null : state.activeChat)
+                        : (state.activeChat?._id === chatId ? data.chat : state.activeChat),
+                    messages: action === 'reject' && state.activeChat?._id === chatId ? [] : state.messages,
+                };
+            });
+            return data.chat;
+        } catch (error) {
+            throw error;
+        }
+    },
+
+    createPoll: async (chatId, question, options) => {
+        try {
+            const { data } = await api.post('/messages/poll', { chatId, question, options });
+            get().addMessage(data.message);
+            return data.message;
+        } catch (error) {
+            toast.error(error.response?.data?.error || 'Failed to create poll');
+            throw error;
+        }
+    },
+
+    votePoll: async (messageId, optionId) => {
+        try {
+            const { data } = await api.post(`/messages/poll/${messageId}/vote`, { optionId });
+            get().updateMessage(data.message);
+            return data.message;
+        } catch (error) {
+            toast.error(error.response?.data?.error || 'Failed to vote on poll');
+            throw error;
+        }
+    },
+
     // Filtered chats
     getFilteredChats: () => {
         const { chats, searchQuery } = get();
         if (!searchQuery) return chats;
         return chats.filter((chat) =>
-            chat.participants.some((p) =>
-                p.name.toLowerCase().includes(searchQuery.toLowerCase())
+            (chat.participants || []).some((p) =>
+                p &&
+                (p.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    p.username?.toLowerCase().includes(searchQuery.toLowerCase()))
             )
         );
     },

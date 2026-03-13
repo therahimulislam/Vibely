@@ -3,6 +3,27 @@
 
 const mongoose = require('mongoose');
 
+const pollOptionSchema = new mongoose.Schema(
+    {
+        optionId: {
+            type: String,
+            required: true,
+        },
+        text: {
+            type: String,
+            required: true,
+            trim: true,
+        },
+        votes: [
+            {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: 'User',
+            },
+        ],
+    },
+    { _id: false }
+);
+
 const messageSchema = new mongoose.Schema(
     {
         chatId: {
@@ -22,7 +43,7 @@ const messageSchema = new mongoose.Schema(
         },
         type: {
             type: String,
-            enum: ['text', 'image', 'video', 'document'],
+            enum: ['text', 'image', 'video', 'document', 'poll'],
             default: 'text',
         },
         fileUrl: {
@@ -65,6 +86,17 @@ const messageSchema = new mongoose.Schema(
         isDeleted: {
             type: Boolean,
             default: false,
+        },
+        poll: {
+            question: {
+                type: String,
+                trim: true,
+                default: '',
+            },
+            options: {
+                type: [pollOptionSchema],
+                default: [],
+            },
         },
     },
     {

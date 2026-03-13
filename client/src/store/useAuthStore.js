@@ -44,7 +44,9 @@ const useAuthStore = create((set, get) => ({
     verifyOTP: async (email, otp) => {
         set({ error: null });
         try {
-            const { data } = await api.post('/auth/verify-otp', { email, otp });
+            const deviceId = getDeviceId();
+            const deviceInfo = await getDeviceInfo();
+            const { data } = await api.post('/auth/verify-otp', { email, otp, deviceId, deviceInfo });
             localStorage.setItem('accessToken', data.accessToken);
             localStorage.setItem('refreshToken', data.refreshToken);
             set({ user: data.user, isAuthenticated: true });
@@ -60,7 +62,9 @@ const useAuthStore = create((set, get) => ({
     login: async (email, password) => {
         set({ error: null }); // Removed isLoading: true
         try {
-            const { data } = await api.post('/auth/login', { email, password });
+            const deviceId = getDeviceId();
+            const deviceInfo = await getDeviceInfo();
+            const { data } = await api.post('/auth/login', { email, password, deviceId, deviceInfo });
             localStorage.setItem('accessToken', data.accessToken);
             localStorage.setItem('refreshToken', data.refreshToken);
             set({ user: data.user, isAuthenticated: true }); // Removed isLoading: false
@@ -77,7 +81,9 @@ const useAuthStore = create((set, get) => ({
     googleLogin: async (credential) => {
         set({ error: null });
         try {
-            const { data } = await api.post('/auth/google', { credential });
+            const deviceId = getDeviceId();
+            const deviceInfo = await getDeviceInfo();
+            const { data } = await api.post('/auth/google', { credential, deviceId, deviceInfo });
             localStorage.setItem('accessToken', data.accessToken);
             localStorage.setItem('refreshToken', data.refreshToken);
             set({ user: data.user, isAuthenticated: true });
@@ -96,6 +102,24 @@ const useAuthStore = create((set, get) => ({
             return data;
         } catch (error) {
             throw new Error(error.response?.data?.error || 'Failed to resend OTP');
+        }
+    },
+
+    forgotPassword: async (email) => {
+        try {
+            const { data } = await api.post('/auth/forgot-password', { email });
+            return data;
+        } catch (error) {
+            throw new Error(error.response?.data?.error || 'Failed to send reset OTP');
+        }
+    },
+
+    resetPasswordWithOTP: async (email, otp, newPassword) => {
+        try {
+            const { data } = await api.post('/auth/reset-password', { email, otp, newPassword });
+            return data;
+        } catch (error) {
+            throw new Error(error.response?.data?.error || 'Failed to reset password');
         }
     },
 
@@ -147,6 +171,34 @@ const useAuthStore = create((set, get) => ({
     // Update user in store
     updateUser: (updates) => {
         set((state) => ({ user: { ...state.user, ...updates } }));
+    },
+
+    addContact: async (userId) => {
+        try {
+            await api.post(`/users/contacts/${userId}`);
+            set((state) => ({
+                user: {
+                    ...state.user,
+                    contacts: Array.from(new Set([...(state.user?.contacts || []), userId])),
+                },
+            }));
+        } catch (error) {
+            throw new Error(error.response?.data?.error || 'Failed to add contact');
+        }
+    },
+
+    removeContact: async (userId) => {
+        try {
+            await api.delete(`/users/contacts/${userId}`);
+            set((state) => ({
+                user: {
+                    ...state.user,
+                    contacts: (state.user?.contacts || []).filter((id) => id !== userId),
+                },
+            }));
+        } catch (error) {
+            throw new Error(error.response?.data?.error || 'Failed to remove contact');
+        }
     },
 
     clearError: () => set({ error: null }),

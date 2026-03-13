@@ -1,25 +1,45 @@
 // client/src/pages/Login.jsx
 // Login page with glassmorphism design and animated background
 
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { GoogleLogin } from '@react-oauth/google';
-import { Mail, Lock, Eye, EyeOff, MessageCircle } from 'lucide-react';
+import { AlertCircle, Eye, EyeOff, Lock, Mail, MessageCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import useAuthStore from '../store/useAuthStore';
 
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+
 export default function Login() {
+    const location = useLocation();
+    const navigate = useNavigate();
+    const { login, googleLogin, clearError } = useAuthStore();
+
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
-    const navigate = useNavigate();
-    const { login, googleLogin, error, clearError } = useAuthStore();
+    const [formError, setFormError] = useState('');
+
+    useEffect(() => {
+        if (location.state?.email) {
+            setEmail(location.state.email);
+        }
+    }, [location.state?.email]);
+
+    const clearFormError = () => {
+        if (formError) {
+            setFormError('');
+        }
+        clearError();
+    };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         setIsLoading(true);
+        setFormError('');
         clearError();
+
         try {
             await login(email, password);
             toast.success('Welcome back!');
@@ -27,36 +47,44 @@ export default function Login() {
         } catch (err) {
             if (err.needsVerification) {
                 navigate('/verify-otp', { state: { email } });
-            } else {
-                toast.error(err.message);
+                return;
             }
+
+            const message = err.message === 'Invalid credentials'
+                ? "Email or password doesn't match"
+                : err.message;
+
+            setFormError(message);
         } finally {
             setIsLoading(false);
         }
     };
 
     const handleGoogleSuccess = async (response) => {
+        setFormError('');
+
         try {
             await googleLogin(response.credential);
             toast.success('Welcome to Vibely!');
             navigate('/');
         } catch (err) {
+            setFormError(err.message);
             toast.error(err.message);
         }
     };
 
     return (
         <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
-            {/* Animated background orbs */}
             <div className="bg-orb bg-orb-1" />
             <div className="bg-orb bg-orb-2" />
             <div className="bg-orb bg-orb-3" />
 
-            <div className="glass-card w-full max-w-md p-8 animate-slide-up relative z-10">
-                {/* Logo */}
+            <div className="glass-card w-full max-w-md p-6 sm:p-8 animate-slide-up relative z-10">
                 <div className="text-center mb-8">
-                    <div className="w-16 h-16 mx-auto mb-4 rounded-2xl flex items-center justify-center"
-                        style={{ background: 'var(--gradient-primary)' }}>
+                    <div
+                        className="w-16 h-16 mx-auto mb-4 rounded-2xl flex items-center justify-center"
+                        style={{ background: 'var(--gradient-primary)' }}
+                    >
                         <MessageCircle className="w-8 h-8 text-white" />
                     </div>
                     <h1 className="text-3xl font-bold bg-gradient-to-r from-primary-400 to-primary-600 bg-clip-text text-transparent">
@@ -66,31 +94,35 @@ export default function Login() {
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-4">
-                    {/* Email */}
                     <div className="relative">
                         <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 opacity-40" />
                         <input
                             id="login-email"
                             type="email"
                             value={email}
-                            onChange={(e) => setEmail(e.target.value)}
+                            onChange={(e) => {
+                                clearFormError();
+                                setEmail(e.target.value);
+                            }}
                             placeholder="Email address"
                             required
                             className="input-glass pl-11"
                         />
                     </div>
 
-                    {/* Password */}
                     <div className="relative">
                         <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 opacity-40" />
                         <input
                             id="login-password"
                             type={showPassword ? 'text' : 'password'}
                             value={password}
-                            onChange={(e) => setPassword(e.target.value)}
+                            onChange={(e) => {
+                                clearFormError();
+                                setPassword(e.target.value);
+                            }}
                             placeholder="Password"
                             required
-                            className="input-glass pl-11 pr-11"
+                            className={`input-glass pl-11 pr-11 ${formError ? 'border-red-400/60 focus:border-red-400' : ''}`}
                         />
                         <button
                             type="button"
@@ -101,7 +133,23 @@ export default function Login() {
                         </button>
                     </div>
 
-                    {/* Submit */}
+                    {formError && (
+                        <div className="glass-card rounded-2xl px-4 py-3 border border-red-400/25 bg-red-500/10 text-red-200 flex items-start gap-2">
+                            <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                            <p className="text-sm">{formError}</p>
+                        </div>
+                    )}
+
+                    <div className="flex justify-end -mt-1">
+                        <Link
+                            to="/forgot-password"
+                            state={{ email }}
+                            className="text-sm text-primary-400 hover:text-primary-300 transition-colors"
+                        >
+                            Forgot password?
+                        </Link>
+                    </div>
+
                     <button
                         id="login-submit"
                         type="submit"
@@ -119,28 +167,34 @@ export default function Login() {
                     </button>
                 </form>
 
-                {/* Divider */}
                 <div className="flex items-center gap-3 my-6">
                     <div className="flex-1 h-px bg-white/10" />
                     <span className="text-xs opacity-40 uppercase tracking-wider">or</span>
                     <div className="flex-1 h-px bg-white/10" />
                 </div>
 
-                {/* Google Login */}
                 <div className="flex justify-center">
-                    <GoogleLogin
-                        onSuccess={handleGoogleSuccess}
-                        onError={() => toast.error('Google login failed')}
-                        theme="filled_black"
-                        shape="pill"
-                        size="large"
-                        text="continue_with"
-                    />
+                    {GOOGLE_CLIENT_ID ? (
+                        <GoogleLogin
+                            onSuccess={handleGoogleSuccess}
+                            onError={() => {
+                                setFormError('Google sign-in could not be completed');
+                                toast.error('Google login failed');
+                            }}
+                            theme="filled_black"
+                            shape="pill"
+                            size="large"
+                            text="continue_with"
+                        />
+                    ) : (
+                        <div className="glass-card px-4 py-3 rounded-2xl text-center text-sm opacity-70">
+                            Google sign-in is not configured on this client yet.
+                        </div>
+                    )}
                 </div>
 
-                {/* Signup link */}
                 <p className="text-center mt-6 text-sm opacity-60">
-                    Don't have an account?{' '}
+                    Don&apos;t have an account?{' '}
                     <Link to="/signup" className="text-primary-400 hover:text-primary-300 font-medium transition-colors">
                         Create one
                     </Link>

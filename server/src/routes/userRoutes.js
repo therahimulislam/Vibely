@@ -10,6 +10,9 @@ const upload = require('../middleware/upload');
 router.use(authenticate);
 
 router.get('/', userController.getUsers);
+router.get('/contacts/list', userController.getContacts);
+router.post('/contacts/:id', userController.addContact);
+router.delete('/contacts/:id', userController.removeContact);
 router.get('/:id', userController.getUserById);
 router.put('/profile', upload.single('avatar'), userController.updateProfile);
 

@@ -6,16 +6,19 @@ import { X, Camera, Edit3, Check } from 'lucide-react';
 import useAuthStore from '../../store/useAuthStore';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
+import AvatarCropModal from './AvatarCropModal';
 
 export default function UserProfile({ onClose }) {
     const { user, updateUser } = useAuthStore();
     const [isEditing, setIsEditing] = useState(false);
     const [name, setName] = useState(user?.name || '');
+    const [username, setUsername] = useState(user?.username || '');
     const [isUploading, setIsUploading] = useState(false);
+    const [pendingAvatarFile, setPendingAvatarFile] = useState(null);
 
     const handleSave = async () => {
         try {
-            const { data } = await api.put('/users/profile', { name });
+            const { data } = await api.put('/users/profile', { name, username });
             updateUser(data.user);
             setIsEditing(false);
             toast.success('Profile updated');
@@ -28,6 +31,10 @@ export default function UserProfile({ onClose }) {
         const file = e.target.files?.[0];
         if (!file) return;
 
+        setPendingAvatarFile(file);
+    };
+
+    const uploadAvatar = async (file) => {
         setIsUploading(true);
         try {
             const formData = new FormData();
@@ -41,6 +48,7 @@ export default function UserProfile({ onClose }) {
             toast.error('Failed to upload avatar');
         } finally {
             setIsUploading(false);
+            setPendingAvatarFile(null);
         }
     };
 
@@ -74,10 +82,7 @@ export default function UserProfile({ onClose }) {
         try {
             const currentToken = localStorage.getItem('refreshToken');
             await api.delete('/auth/sessions', { data: { currentRefreshToken: currentToken } });
-            setSessions(prev => prev.filter(s => {
-                const currentMasked = currentToken ? currentToken.slice(-5) : '';
-                return s.maskedToken === currentMasked;
-            }));
+            setSessions(prev => prev.filter(s => s.isCurrent));
             toast.success('All other devices logged out');
         } catch {
             toast.error('Failed to logout other devices');
@@ -88,7 +93,7 @@ export default function UserProfile({ onClose }) {
         <div className="fixed inset-0 z-40 flex justify-end" onClick={onClose}>
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
             <div
-                className="relative w-full max-w-sm h-full glass-panel animate-slide-in-right border-l border-white/5 overflow-y-auto"
+                className="relative w-full sm:max-w-sm md:max-w-md h-[100dvh] glass-panel animate-slide-in-right border-l border-white/5 overflow-y-auto"
                 onClick={(e) => e.stopPropagation()}
             >
                 {/* Header */}
@@ -114,7 +119,7 @@ export default function UserProfile({ onClose }) {
 
                 {view === 'profile' ? (
                     /* Avatar */
-                    <div className="p-8 flex flex-col items-center">
+                    <div className="p-5 sm:p-8 flex flex-col items-center">
                         <div className="relative mb-6">
                             <div className="w-28 h-28 rounded-full overflow-hidden ring-4 ring-primary-500/20">
                                 {user?.avatar ? (
@@ -138,7 +143,7 @@ export default function UserProfile({ onClose }) {
                         </div>
 
                         {/* Name */}
-                        <div className="w-full max-w-xs">
+                        <div className="w-full max-w-sm">
                             <label className="text-xs opacity-40 uppercase tracking-wider mb-1 block">Name</label>
                             {isEditing ? (
                                 <div className="flex items-center gap-2">
@@ -162,8 +167,24 @@ export default function UserProfile({ onClose }) {
                             )}
                         </div>
 
+                        {/* Username */}
+                        <div className="w-full max-w-sm mt-4">
+                            <label className="text-xs opacity-40 uppercase tracking-wider mb-1 block">Username</label>
+                            {isEditing ? (
+                                <input
+                                    value={username}
+                                    onChange={(e) => setUsername(e.target.value.toLowerCase())}
+                                    className="input-glass py-2 text-sm"
+                                />
+                            ) : (
+                                <div className="glass-card px-4 py-3 rounded-xl">
+                                    <span className="text-sm opacity-70">@{user?.username}</span>
+                                </div>
+                            )}
+                        </div>
+
                         {/* Email */}
-                        <div className="w-full max-w-xs mt-4">
+                        <div className="w-full max-w-sm mt-4">
                             <label className="text-xs opacity-40 uppercase tracking-wider mb-1 block">Email</label>
                             <div className="glass-card px-4 py-3 rounded-xl">
                                 <span className="text-sm opacity-70">{user?.email}</span>
@@ -171,7 +192,7 @@ export default function UserProfile({ onClose }) {
                         </div>
 
                         {/* Member since */}
-                        <div className="w-full max-w-xs mt-4">
+                        <div className="w-full max-w-sm mt-4">
                             <label className="text-xs opacity-40 uppercase tracking-wider mb-1 block">Member Since</label>
                             <div className="glass-card px-4 py-3 rounded-xl">
                                 <span className="text-sm opacity-70">
@@ -198,8 +219,7 @@ export default function UserProfile({ onClose }) {
                         ) : (
                             <div className="space-y-3">
                                 {sessions.map(session => {
-                                    const currentToken = localStorage.getItem('refreshToken');
-                                    const isCurrent = currentToken && session.maskedToken === currentToken.slice(-5);
+                                    const isCurrent = !!session.isCurrent;
 
                                     return (
                                         <div key={session._id} className="glass-card p-3 rounded-xl relative group">
@@ -245,6 +265,14 @@ export default function UserProfile({ onClose }) {
                     </div>
                 )}
             </div>
+
+            {pendingAvatarFile && (
+                <AvatarCropModal
+                    file={pendingAvatarFile}
+                    onCancel={() => setPendingAvatarFile(null)}
+                    onConfirm={uploadAvatar}
+                />
+            )}
         </div>
     );
 }

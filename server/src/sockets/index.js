@@ -1,4 +1,3 @@
-// server/src/sockets/index.js
 // Socket.io initialization and event handling
 
 const { verifyAccessToken } = require('../services/tokenService');
@@ -7,11 +6,10 @@ const { getRedis } = require('../config/redis');
 const chatHandler = require('./chatHandler');
 const callHandler = require('./callHandler');
 
-// Map of userId -> socketId for quick lookup
+// Map of userId -> Set<socketId> for multi-tab/device presence tracking
 const onlineUsers = new Map();
 
 const initializeSocket = (io) => {
-    // Socket authentication middleware
     io.use(async (socket, next) => {
         try {
             const token = socket.handshake.auth.token;
@@ -20,9 +18,16 @@ const initializeSocket = (io) => {
             }
 
             const decoded = verifyAccessToken(token);
-            const user = await User.findById(decoded.userId);
+            const user = await User.findById(decoded.userId).select('+sessions');
             if (!user) {
                 return next(new Error('User not found'));
+            }
+
+            if (decoded.sessionId) {
+                const activeSession = user.sessions?.find((session) => session._id.toString() === decoded.sessionId.toString());
+                if (!activeSession) {
+                    return next(new Error('Session revoked'));
+                }
             }
 
             socket.userId = user._id.toString();
@@ -35,45 +40,57 @@ const initializeSocket = (io) => {
 
     io.on('connection', async (socket) => {
         const userId = socket.userId;
-        console.log(`🟢 User connected: ${userId}`);
+        console.log(`User connected: ${userId}`);
+        socket.join(`user:${userId}`);
 
-        // Add to online users map
-        onlineUsers.set(userId, socket.id);
+        const userSockets = onlineUsers.get(userId) || new Set();
+        const wasOffline = userSockets.size === 0;
+        userSockets.add(socket.id);
+        onlineUsers.set(userId, userSockets);
 
-        // Update user status in DB
         await User.findByIdAndUpdate(userId, { isOnline: true, lastSeen: new Date() });
 
-        // Store in Redis if available
         const redis = getRedis();
         if (redis) {
             await redis.sadd('online_users', userId);
         }
 
-        // Broadcast online status to all connected users
-        socket.broadcast.emit('userOnline', { userId });
+        socket.emit('onlineUsers', { userIds: [...onlineUsers.keys()] });
 
-        // Register chat event handlers
+        if (wasOffline) {
+            socket.broadcast.emit('userOnline', { userId });
+        }
+
         chatHandler(io, socket, onlineUsers);
-
-        // Register call event handlers
         callHandler(io, socket, onlineUsers);
 
-        // Handle disconnect
         socket.on('disconnect', async () => {
-            console.log(`🔴 User disconnected: ${userId}`);
+            console.log(`User disconnected: ${userId}`);
 
-            onlineUsers.delete(userId);
-
-            await User.findByIdAndUpdate(userId, {
-                isOnline: false,
-                lastSeen: new Date(),
-            });
-
-            if (redis) {
-                await redis.srem('online_users', userId);
+            const activeSockets = onlineUsers.get(userId);
+            if (activeSockets) {
+                activeSockets.delete(socket.id);
+                if (activeSockets.size === 0) {
+                    onlineUsers.delete(userId);
+                } else {
+                    onlineUsers.set(userId, activeSockets);
+                }
             }
 
-            socket.broadcast.emit('userOffline', { userId, lastSeen: new Date() });
+            const isStillOnline = onlineUsers.has(userId);
+
+            if (!isStillOnline) {
+                await User.findByIdAndUpdate(userId, {
+                    isOnline: false,
+                    lastSeen: new Date(),
+                });
+
+                if (redis) {
+                    await redis.srem('online_users', userId);
+                }
+
+                socket.broadcast.emit('userOffline', { userId, lastSeen: new Date() });
+            }
         });
     });
 };

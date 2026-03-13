@@ -37,9 +37,14 @@ export default function ChatItem({ chat, displayUser, isActive, isOnline, isTypi
             {/* Chat info */}
             <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between">
-                    <h3 className={`text-sm font-semibold truncate ${unreadCount > 0 ? 'opacity-100' : 'opacity-80'}`}>
-                        {displayUser.name}
-                    </h3>
+                    <div className="min-w-0">
+                        <h3 className={`text-sm font-semibold truncate ${unreadCount > 0 ? 'opacity-100' : 'opacity-80'}`}>
+                            {displayUser.name}
+                        </h3>
+                        {!displayUser.isGroup && displayUser.username && (
+                            <p className="text-[11px] opacity-40 truncate">@{displayUser.username}</p>
+                        )}
+                    </div>
                     <div className="flex items-center gap-1 flex-shrink-0">
                         {isPinned && <Pin className="w-3 h-3 text-primary-400" />}
                         {lastMsg && (
@@ -61,11 +66,19 @@ export default function ChatItem({ chat, displayUser, isActive, isOnline, isTypi
                                     <span className="typing-dot w-1 h-1 rounded-full bg-primary-400 inline-block" />
                                 </span>
                             </span>
+                        ) : chat.requestStatus === 'pending' ? (
+                            chat.requestedBy?._id === displayUser._id ? 'Message request' : 'Waiting for acceptance'
                         ) : lastMsg ? (
-                            lastMsg.imageUrl && !lastMsg.text ? (
+                            lastMsg.type === 'poll' ? (
+                                <span>Poll: {lastMsg.poll?.question || 'New poll'}</span>
+                            ) : (lastMsg.type === 'image' || lastMsg.imageUrl) && !lastMsg.text ? (
                                 <span className="flex items-center gap-1">
                                     <Image className="w-3 h-3" /> Photo
                                 </span>
+                            ) : lastMsg.type === 'video' && !lastMsg.text ? (
+                                <span>Video</span>
+                            ) : lastMsg.type === 'document' && !lastMsg.text ? (
+                                <span>Document</span>
                             ) : lastMsg.isDeleted ? (
                                 <span className="italic">Message deleted</span>
                             ) : (

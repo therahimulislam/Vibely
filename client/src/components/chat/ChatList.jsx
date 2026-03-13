@@ -23,7 +23,7 @@ export default function ChatList() {
                 (p) =>
                     p._id !== user._id &&
                     (p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                        p.email.toLowerCase().includes(searchQuery.toLowerCase()))
+                        p.username?.toLowerCase().includes(searchQuery.toLowerCase()))
             );
         })
         : chats;
@@ -78,7 +78,7 @@ export default function ChatList() {
                     displayUser = validParticipants.find((p) => p._id !== user._id);
                     if (!displayUser) return null;
                     // Safeguard against onlineUsers not being a Set
-                    isOnline = onlineUsers instanceof Set ? onlineUsers.has(displayUser._id) : false;
+                    isOnline = onlineUsers instanceof Set ? onlineUsers.has(displayUser._id) : !!displayUser.isOnline;
                 }
 
                 const isTyping = typingUsers?.[chat._id]; // Just check if truthy for now

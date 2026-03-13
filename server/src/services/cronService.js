@@ -3,6 +3,7 @@
 
 const cron = require('node-cron');
 const Message = require('../models/Message');
+const Status = require('../models/Status');
 const { deleteImage } = require('./cloudinaryService');
 
 const initCronJobs = () => {
@@ -11,6 +12,20 @@ const initCronJobs = () => {
         console.log('⏳ Running retention cron job...');
         try {
             const now = new Date();
+
+            const expiredStatuses = await Status.find({
+                expiresAt: { $lt: now }
+            });
+
+            if (expiredStatuses.length > 0) {
+                console.log(`Found ${expiredStatuses.length} expired statuses`);
+                for (const status of expiredStatuses) {
+                    if (status.publicId) {
+                        await deleteImage(status.publicId, status.mediaResourceType || 'image');
+                    }
+                    await Status.findByIdAndDelete(status._id);
+                }
+            }
 
             // 1. Delete media (images/videos) older than 24 hours
             const mediaExpiration = new Date(now.getTime() - 24 * 60 * 60 * 1000); // 24 hours ago
@@ -24,7 +39,7 @@ const initCronJobs = () => {
                 console.log(`Found ${mediaMessages.length} expired media messages`);
                 for (const msg of mediaMessages) {
                     if (msg.publicId) {
-                        await deleteImage(msg.publicId);
+                        await deleteImage(msg.publicId, msg.type === 'video' ? 'video' : 'image');
                     }
                     // We can either delete the message entirely or just clear the file
                     // Use case implies "stored in server for 24hrs", so we likely delete the message
@@ -48,7 +63,7 @@ const initCronJobs = () => {
                 console.log(`Found ${oldMessages.length} expired old messages`);
                 for (const msg of oldMessages) {
                     if (msg.publicId) {
-                        await deleteImage(msg.publicId);
+                        await deleteImage(msg.publicId, msg.type === 'video' ? 'video' : 'image');
                     }
                     await Message.findByIdAndDelete(msg._id);
                 }

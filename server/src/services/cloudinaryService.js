@@ -76,9 +76,9 @@ const uploadAvatar = async (filePath) => {
     }
 };
 
-const deleteImage = async (publicId) => {
+const deleteImage = async (publicId, resourceType = 'image') => {
     try {
-        await cloudinary.uploader.destroy(publicId);
+        await cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
     } catch (error) {
         console.error('Cloudinary delete error:', error.message);
     }

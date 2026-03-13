@@ -2,9 +2,10 @@
 // Main chat message area with header, messages, and input
 
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { ArrowLeft, Phone, Video, MoreVertical, Pin, Trash2, Search, Users } from 'lucide-react';
+import { ArrowLeft, Phone, Video, MoreVertical, Pin, Trash2, Search, Users, UserPlus, Check, X as CloseIcon, UserRoundMinus } from 'lucide-react';
 import useChatStore from '../../store/useChatStore';
 import useAuthStore from '../../store/useAuthStore';
+import useStatusStore from '../../store/useStatusStore';
 import useSocket from '../../hooks/useSocket';
 import useWebRTC from '../../hooks/useWebRTC';
 import MessageBubble from './MessageBubble';
@@ -13,8 +14,9 @@ import TypingIndicator from './TypingIndicator';
 import { formatLastSeen } from '../../utils/formatters';
 
 export default function MessageArea({ onBack, onProfileClick }) {
-    const { activeChat, messages, isLoadingMessages, hasMoreMessages, loadMoreMessages, typingUsers, onlineUsers, markAsSeen, togglePin, deleteChat, addToGroup } = useChatStore();
-    const { user } = useAuthStore();
+    const { activeChat, messages, isLoadingMessages, hasMoreMessages, loadMoreMessages, typingUsers, onlineUsers, markAsSeen, togglePin, deleteChat, addToGroup, respondToRequest } = useChatStore();
+    const { user, removeContact } = useAuthStore();
+    const { fetchStatuses } = useStatusStore();
     const { emitMessageSeen } = useSocket();
     const { startCall } = useWebRTC();
     const messagesEndRef = useRef(null);
@@ -39,13 +41,15 @@ export default function MessageArea({ onBack, onProfileClick }) {
         name: otherUser?.name,
         avatar: otherUser?.avatar,
         isGroup: false,
-        onlineStatus: (onlineUsers instanceof Set && onlineUsers.has(otherUser?._id)) ? 'online' : `last seen ${formatLastSeen(otherUser?.lastSeen)}`,
+        onlineStatus: ((onlineUsers instanceof Set && onlineUsers.has(otherUser?._id)) || otherUser?.isOnline) ? 'online' : `last seen ${formatLastSeen(otherUser?.lastSeen)}`,
         _id: otherUser?._id
     };
 
-    const isOnline = !chatInfo.isGroup && (onlineUsers instanceof Set ? onlineUsers.has(otherUser?._id) : false);
+    const isOnline = !chatInfo.isGroup && ((onlineUsers instanceof Set ? onlineUsers.has(otherUser?._id) : false) || !!otherUser?.isOnline);
     const isTyping = typingUsers?.[activeChat?._id];
     const isPinned = activeChat?.pinnedBy?.includes(user._id);
+    const isPendingRequest = !activeChat?.isGroup && activeChat?.requestStatus === 'pending';
+    const isRequester = activeChat?.requestedBy?._id === user._id || activeChat?.requestedBy === user._id;
 
     // Scroll to bottom on new messages
     useEffect(() => {
@@ -95,7 +99,7 @@ export default function MessageArea({ onBack, onProfileClick }) {
     return (
         <div className="flex-1 flex flex-col h-full relative">
             {/* Chat Header */}
-            <div className="px-4 py-3 flex items-center justify-between flex-shrink-0 glass-panel border-b border-white/5 relative z-10 bg-background/50 backdrop-blur-md min-h-[60px]">
+            <div className="px-3 sm:px-4 py-3 flex items-center justify-between flex-shrink-0 glass-panel border-b border-white/5 relative z-10 bg-background/50 backdrop-blur-md min-h-[60px]">
                 <div className="flex items-center gap-3 min-w-0 flex-1 mr-2">
                     <button onClick={onBack} className="md:hidden p-1 rounded-lg hover:bg-white/5 flex-shrink-0">
                         <ArrowLeft className="w-5 h-5" />
@@ -119,25 +123,63 @@ export default function MessageArea({ onBack, onProfileClick }) {
                                 ? 'typing...'
                                 : chatInfo.onlineStatus}
                         </p>
+                        {!chatInfo.isGroup && otherUser?.username && (
+                            <p className="text-[11px] opacity-35 truncate">@{otherUser.username}</p>
+                        )}
                     </div>
                 </div>
 
-                <div className="flex items-center gap-1 flex-shrink-0">
+                <div className="flex items-center gap-0.5 sm:gap-1 flex-shrink-0">
                     <button
                         onClick={() => setShowSearch(!showSearch)}
                         className="hidden md:block p-2 rounded-xl hover:bg-white/5 transition-colors"
                     >
                         <Search className="w-5 h-5 opacity-50" />
                     </button>
-                    {!chatInfo.isGroup && (
-                        <button
-                            onClick={() => startCall(otherUser._id)}
-                            className="p-2 rounded-xl hover:bg-white/5 transition-colors"
-                            title="Video call"
-                        >
-                            <Video className="w-5 h-5 opacity-50" />
-                        </button>
-                    )}
+                    <button
+                        onClick={() => {
+                            if (chatInfo.isGroup) {
+                                startCall({
+                                    chatId: activeChat._id,
+                                    chatName: activeChat.groupName || 'Group Chat',
+                                    chatAvatar: activeChat.groupAvatar,
+                                }, 'audio');
+                                return;
+                            }
+
+                            startCall(otherUser._id, 'audio', {
+                                name: otherUser?.name,
+                                avatar: otherUser?.avatar,
+                                username: otherUser?.username,
+                            });
+                        }}
+                        className="p-2 rounded-xl hover:bg-white/5 transition-colors"
+                        title={chatInfo.isGroup ? 'Start group audio call' : 'Audio call'}
+                    >
+                        <Phone className="w-5 h-5 opacity-50" />
+                    </button>
+                    <button
+                        onClick={() => {
+                            if (chatInfo.isGroup) {
+                                startCall({
+                                    chatId: activeChat._id,
+                                    chatName: activeChat.groupName || 'Group Chat',
+                                    chatAvatar: activeChat.groupAvatar,
+                                }, 'video');
+                                return;
+                            }
+
+                            startCall(otherUser._id, 'video', {
+                                name: otherUser?.name,
+                                avatar: otherUser?.avatar,
+                                username: otherUser?.username,
+                            });
+                        }}
+                        className="p-2 rounded-xl hover:bg-white/5 transition-colors"
+                        title={chatInfo.isGroup ? 'Start group video call' : 'Video call'}
+                    >
+                        <Video className="w-5 h-5 opacity-50" />
+                    </button>
                     <div className="relative">
                         <button
                             onClick={() => setShowMenu(!showMenu)}
@@ -157,14 +199,29 @@ export default function MessageArea({ onBack, onProfileClick }) {
                                 {chatInfo.isGroup && (
                                     <button
                                         onClick={() => {
-                                            const email = window.prompt('Enter user email to add:');
-                                            if (email) addToGroup(activeChat._id, null, email);
+                                            const username = window.prompt('Enter username to add:');
+                                            if (username) addToGroup(activeChat._id, null, username);
                                             setShowMenu(false);
                                         }}
                                         className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-lg hover:bg-white/5 transition-colors"
                                     >
                                         <UserPlus className="w-4 h-4" />
                                         Add Members
+                                    </button>
+                                )}
+                                {!chatInfo.isGroup && (
+                                    <button
+                                        onClick={async () => {
+                                            if (window.confirm('Remove this contact?')) {
+                                                await removeContact(otherUser._id);
+                                                await fetchStatuses();
+                                            }
+                                            setShowMenu(false);
+                                        }}
+                                        className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-lg hover:bg-red-500/10 text-red-300 transition-colors"
+                                    >
+                                        <UserRoundMinus className="w-4 h-4" />
+                                        Remove Contact
                                     </button>
                                 )}
                                 <button
@@ -206,6 +263,39 @@ export default function MessageArea({ onBack, onProfileClick }) {
                 onScroll={handleScroll}
                 className="flex-1 overflow-y-auto px-4 py-3"
             >
+                {isPendingRequest && !isRequester && (
+                    <div className="mb-4 glass-card p-4 rounded-2xl border border-primary-500/20">
+                        <p className="text-sm font-medium mb-2">{otherUser?.name} wants to chat with you</p>
+                        <p className="text-xs opacity-55 mb-3">Accept to reply, or reject to remove this request.</p>
+                        <div className="flex gap-2">
+                            <button
+                                onClick={async () => {
+                                    await respondToRequest(activeChat._id, 'accept');
+                                }}
+                                className="btn-primary px-4 py-2 text-sm"
+                            >
+                                <span className="flex items-center gap-2"><Check className="w-4 h-4" /> Accept</span>
+                            </button>
+                            <button
+                                onClick={async () => {
+                                    await respondToRequest(activeChat._id, 'reject');
+                                    onBack?.();
+                                }}
+                                className="btn-glass px-4 py-2 text-sm"
+                            >
+                                <span className="flex items-center gap-2"><CloseIcon className="w-4 h-4" /> Reject</span>
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {isPendingRequest && isRequester && (
+                    <div className="mb-4 glass-card p-4 rounded-2xl border border-white/10">
+                        <p className="text-sm font-medium">Chat request sent</p>
+                        <p className="text-xs opacity-55 mt-1">They need to accept before replying.</p>
+                    </div>
+                )}
+
                 {isLoadingMessages && messages.length === 0 && (
                     <div className="flex justify-center py-8">
                         <div className="w-6 h-6 border-2 border-primary-400/30 border-t-primary-400 rounded-full animate-spin" />
@@ -260,7 +350,12 @@ export default function MessageArea({ onBack, onProfileClick }) {
             </div>
 
             {/* Message Input */}
-            <MessageInput chatId={activeChat._id} recipientId={otherUser?._id} isGroup={chatInfo.isGroup} />
+            <MessageInput
+                chatId={activeChat._id}
+                recipientId={otherUser?._id}
+                isGroup={chatInfo.isGroup}
+                disabled={isPendingRequest && !isRequester}
+            />
         </div>
     );
 }

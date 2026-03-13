@@ -24,6 +24,16 @@ exports.sendOTP = async (req, res) => {
     }
 };
 
+// POST /api/auth/forgot-password
+exports.forgotPassword = async (req, res) => {
+    try {
+        const result = await authService.requestPasswordReset(req.body.email);
+        res.json(result);
+    } catch (error) {
+        res.status(error.statusCode || 500).json({ error: error.message });
+    }
+};
+
 // POST /api/auth/verify-otp
 exports.verifyOTP = async (req, res) => {
     try {
@@ -31,6 +41,17 @@ exports.verifyOTP = async (req, res) => {
         const ip = req.ip;
         const userAgent = req.headers['user-agent'];
         const result = await authService.verifyOTP(email, otp, ip, userAgent, deviceId, deviceInfo);
+        res.json(result);
+    } catch (error) {
+        res.status(error.statusCode || 500).json({ error: error.message });
+    }
+};
+
+// POST /api/auth/reset-password
+exports.resetPassword = async (req, res) => {
+    try {
+        const { email, otp, newPassword } = req.body;
+        const result = await authService.resetPasswordWithOTP(email, otp, newPassword);
         res.json(result);
     } catch (error) {
         res.status(error.statusCode || 500).json({ error: error.message });
