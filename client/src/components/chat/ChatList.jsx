@@ -24,12 +24,15 @@ export default function ChatList({ filterMode = 'all' }) {
     const { chats, activeChat, setActiveChat, searchQuery, isLoadingChats, onlineUsers, typingUsers } = useChatStore();
     const { user } = useAuthStore();
     const chatFolders = user?.preferences?.chatFolders || [];
+    const chatDrafts = user?.preferences?.chatDrafts || [];
     const isArchivedChat = (chat) => chat.archivedBy?.some((id) => String(id) === String(user?._id));
     const activeFolderId = filterMode.startsWith('folder:') ? filterMode.slice('folder:'.length) : '';
     const activeFolder = chatFolders.find((folder) => folder.folderId === activeFolderId) || null;
     const getFoldersForChat = (chatId) => chatFolders.filter((folder) =>
         (folder.chatIds || []).some((id) => String(id) === String(chatId))
     );
+    const getDraftTextForChat = (chatId) =>
+        chatDrafts.find((entry) => `${entry.chatId}` === `${chatId}`)?.text || '';
 
     // Filter chats based on search
     const safeChats = Array.isArray(chats) ? chats : [];
@@ -145,6 +148,7 @@ export default function ChatList({ filterMode = 'all' }) {
         const unread = chat.unreadCount?.[user._id] || 0;
         const isPinned = chat.pinnedBy?.includes(user._id);
         const chatFolder = getFoldersForChat(chat._id)[0] || null;
+        const draftText = getDraftTextForChat(chat._id);
 
         return (
             <ChatItem
@@ -158,6 +162,7 @@ export default function ChatList({ filterMode = 'all' }) {
                 isPinned={isPinned}
                 folderLabel={chatFolder?.name || ''}
                 folderColor={chatFolder?.color || ''}
+                draftText={draftText}
                 onClick={() => setActiveChat(chat)}
             />
         );

@@ -41,12 +41,20 @@ body {
   transition: background 0.4s ease, color 0.25s ease;
 }
 
-body.dark {
+html {
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+html.dark body {
   background: var(--gradient-bg-dark);
   color: var(--text-dark);
 }
 
-body:not(.dark) {
+html:not(.dark) body {
   background: var(--gradient-bg-light);
   color: var(--text-light);
 }
@@ -71,12 +79,12 @@ h1, h2, h3, h4, h5, h6 {
     box-shadow: var(--shadow-card);
   }
 
-  .dark .glass-card {
+  html.dark .glass-card {
     background: var(--gradient-panel-dark);
     border-color: var(--glass-border);
   }
 
-  .glass-card:not(.dark .glass-card) {
+  html:not(.dark) .glass-card {
     background: var(--gradient-panel-light);
     border-color: var(--glass-border-light);
   }
@@ -91,12 +99,12 @@ h1, h2, h3, h4, h5, h6 {
     box-shadow: var(--shadow-soft);
   }
 
-  .dark .surface-elevated {
+  html.dark .surface-elevated {
     background: linear-gradient(180deg, rgba(19, 23, 37, 0.92), rgba(13, 16, 27, 0.88));
     border-color: rgba(255, 255, 255, 0.08);
   }
 
-  .surface-elevated:not(.dark .surface-elevated) {
+  html:not(.dark) .surface-elevated {
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(244, 247, 255, 0.95));
     border-color: rgba(214, 222, 255, 0.9);
   }
@@ -105,12 +113,12 @@ h1, h2, h3, h4, h5, h6 {
     @apply rounded-[22px] border;
   }
 
-  .dark .surface-muted {
+  html.dark .surface-muted {
     background: var(--surface-muted-dark);
     border-color: rgba(255, 255, 255, 0.06);
   }
 
-  .surface-muted:not(.dark .surface-muted) {
+  html:not(.dark) .surface-muted {
     background: var(--surface-muted-light);
     border-color: rgba(210, 217, 245, 0.65);
   }
@@ -130,12 +138,12 @@ h1, h2, h3, h4, h5, h6 {
     -webkit-backdrop-filter: blur(18px);
   }
 
-  .dark .bubble-received {
+  html.dark .bubble-received {
     background: rgba(255, 255, 255, 0.07);
     border-color: rgba(255, 255, 255, 0.09);
   }
 
-  .bubble-received:not(.dark .bubble-received) {
+  html:not(.dark) .bubble-received {
     background: rgba(255, 255, 255, 0.9);
     border-color: rgba(209, 215, 236, 0.62);
     box-shadow: 0 10px 24px rgba(17, 24, 39, 0.05);
@@ -162,13 +170,13 @@ h1, h2, h3, h4, h5, h6 {
     backdrop-filter: blur(14px);
   }
 
-  .dark .btn-glass {
+  html.dark .btn-glass {
     background: rgba(255, 255, 255, 0.06);
     border-color: rgba(255, 255, 255, 0.12);
     color: #e2e8f0;
   }
 
-  .btn-glass:not(.dark .btn-glass) {
+  html:not(.dark) .btn-glass {
     background: rgba(255, 255, 255, 0.7);
     border-color: rgba(200, 200, 230, 0.5);
     color: #1a1a2e;
@@ -185,13 +193,13 @@ h1, h2, h3, h4, h5, h6 {
     backdrop-filter: blur(14px);
   }
 
-  .dark .input-glass {
+  html.dark .input-glass {
     background: rgba(255, 255, 255, 0.06);
     border-color: rgba(255, 255, 255, 0.12);
     color: #e2e8f0;
   }
 
-  .input-glass:not(.dark .input-glass) {
+  html:not(.dark) .input-glass {
     background: rgba(255, 255, 255, 0.75);
     border-color: rgba(200, 200, 230, 0.5);
     color: #1a1a2e;
@@ -211,12 +219,12 @@ h1, h2, h3, h4, h5, h6 {
     height: 42px;
   }
 
-  .dark .icon-button {
+  html.dark .icon-button {
     background: rgba(255, 255, 255, 0.045);
     border-color: rgba(255, 255, 255, 0.07);
   }
 
-  .icon-button:not(.dark .icon-button) {
+  html:not(.dark) .icon-button {
     background: rgba(255, 255, 255, 0.78);
     border-color: rgba(214, 220, 244, 0.72);
   }
@@ -231,12 +239,12 @@ h1, h2, h3, h4, h5, h6 {
     @apply inline-flex items-center gap-1 rounded-full px-3 py-1 text-[11px] font-medium;
   }
 
-  .dark .badge-pill {
+  html.dark .badge-pill {
     background: rgba(255, 255, 255, 0.06);
     color: rgba(232, 235, 255, 0.72);
   }
 
-  .badge-pill:not(.dark .badge-pill) {
+  html:not(.dark) .badge-pill {
     background: rgba(255, 255, 255, 0.74);
     color: rgba(19, 25, 41, 0.72);
   }
@@ -247,13 +255,13 @@ h1, h2, h3, h4, h5, h6 {
     -webkit-backdrop-filter: blur(14px);
   }
 
-  .dark .floating-separator {
+  html.dark .floating-separator {
     background: rgba(255, 255, 255, 0.07);
     color: rgba(232, 235, 255, 0.62);
     border: 1px solid rgba(255, 255, 255, 0.08);
   }
 
-  .floating-separator:not(.dark .floating-separator) {
+  html:not(.dark) .floating-separator {
     background: rgba(255, 255, 255, 0.82);
     color: rgba(19, 25, 41, 0.64);
     border: 1px solid rgba(212, 220, 244, 0.68);
@@ -315,13 +323,13 @@ h1, h2, h3, h4, h5, h6 {
   @apply w-12 h-14 text-center text-xl font-bold rounded-xl border-2 outline-none transition-all;
 }
 
-.dark .otp-input {
+html.dark .otp-input {
   background: rgba(255, 255, 255, 0.06);
   border-color: rgba(255, 255, 255, 0.15);
   color: #e2e8f0;
 }
 
-.otp-input:not(.dark .otp-input) {
+html:not(.dark) .otp-input {
   background: rgba(255, 255, 255, 0.8);
   border-color: rgba(200, 200, 230, 0.5);
   color: #1a1a2e;

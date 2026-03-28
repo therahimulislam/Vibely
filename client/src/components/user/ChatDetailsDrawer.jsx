@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Globe, Instagram, AtSign, ImageIcon, Shield, Users, X, Pin, FileText, Link2, Mic, BellRing, Volume2, VolumeX } from 'lucide-react';
+import { Globe, Instagram, AtSign, ImageIcon, Shield, Users, X, Pin, FileText, Link2, Mic, BellRing, Volume2, VolumeX, Clock3, Copy, Link2Off, UserPlus } from 'lucide-react';
 import toast from 'react-hot-toast';
 import useAuthStore from '../../store/useAuthStore';
 import useChatStore from '../../store/useChatStore';
@@ -144,7 +144,16 @@ const ChatLibrarySection = ({ activeTab, setActiveTab, items, counts, isLoading 
 
 export default function ChatDetailsDrawer({ mode, user: initialUser, chat, onClose }) {
     const { user: currentUser, saveChatNotificationSettings } = useAuthStore();
-    const { pinnedMessages, isLoadingPinnedMessages, fetchPinnedMessages, togglePinMessage } = useChatStore();
+    const {
+        pinnedMessages,
+        isLoadingPinnedMessages,
+        fetchPinnedMessages,
+        togglePinMessage,
+        updateGroupSettings,
+        createInviteLink,
+        revokeInviteLink,
+        reviewJoinRequest,
+    } = useChatStore();
     const [profileUser, setProfileUser] = useState(initialUser);
     const [isLoading, setIsLoading] = useState(mode === 'user');
     const [assetTab, setAssetTab] = useState('media');
@@ -243,7 +252,37 @@ export default function ChatDetailsDrawer({ mode, user: initialUser, chat, onClo
         return chat.groupAdmin?._id || chat.groupAdmin;
     }, [chat?.groupAdmin]);
 
-    const isCurrentUserGroupAdmin = currentUser?._id && groupAdminId === currentUser._id;
+    const isCurrentUserGroupAdmin = !!currentUser?._id && `${groupAdminId}` === `${currentUser._id}`;
+    const normalizedGroupSettings = {
+        adminOnlyMessages: false,
+        allowMemberMedia: true,
+        allowMemberPolls: true,
+        joinApprovalEnabled: false,
+        slowModeSeconds: 0,
+        ...(chat?.groupSettings || {}),
+    };
+    const disappearingSettings = {
+        enabled: false,
+        durationHours: 0,
+        ...(chat?.disappearingMessages || {}),
+    };
+    const disappearingOptions = [
+        { value: 0, label: 'Off' },
+        { value: 24, label: '24h' },
+        { value: 168, label: '7d' },
+        { value: 2160, label: '90d' },
+    ];
+    const slowModeOptions = [
+        { value: 0, label: 'Off' },
+        { value: 15, label: '15s' },
+        { value: 30, label: '30s' },
+        { value: 60, label: '1m' },
+        { value: 300, label: '5m' },
+        { value: 900, label: '15m' },
+        { value: 3600, label: '1h' },
+    ];
+    const activeInviteLinks = (chat?.inviteLinks || []).filter((entry) => !entry?.revokedAt);
+    const pendingJoinRequests = chat?.pendingJoinRequests || [];
     const canManagePins = !chat?.isGroup || isCurrentUserGroupAdmin;
     const getMutePresetId = (mutedUntil) => {
         if (!mutedUntil) return 'off';
@@ -292,6 +331,49 @@ export default function ChatDetailsDrawer({ mode, user: initialUser, chat, onClo
             toast.error(error.message);
         }
     };
+    const persistGroupControls = async (partial = {}) => {
+        if (!chat?._id || !isCurrentUserGroupAdmin) return;
+        try {
+            await updateGroupSettings(chat._id, {
+                groupSettings: {
+                    ...normalizedGroupSettings,
+                    ...(partial.groupSettings || {}),
+                },
+                disappearingMessages: {
+                    ...disappearingSettings,
+                    ...(partial.disappearingMessages || {}),
+                },
+            });
+        } catch (error) {
+            console.error('Failed to persist group controls', error);
+        }
+    };
+    const handleCopyInviteLink = async (inviteLink, { silent = false } = {}) => {
+        const fallbackUrl = `${window.location.origin.replace(/\/$/, '')}/join/${inviteLink.code}`;
+        const value = inviteLink.url || fallbackUrl;
+        try {
+            await navigator.clipboard.writeText(value);
+            if (!silent) {
+                toast.success('Invite link copied');
+            }
+        } catch (error) {
+            toast.error('Unable to copy invite link');
+        }
+    };
+    const handleCreateInviteLink = async () => {
+        if (!chat?._id) return;
+        try {
+            const inviteLink = await createInviteLink(chat._id);
+            if (inviteLink) {
+                await handleCopyInviteLink(inviteLink, { silent: true });
+            }
+        } catch (error) {
+            console.error('Failed to create invite link', error);
+        }
+    };
+    const memberPermissionSummary = normalizedGroupSettings.adminOnlyMessages
+        ? 'Only admins can post right now. Members can still read, react, and join calls.'
+        : `${normalizedGroupSettings.allowMemberMedia ? 'Members can share media.' : 'Media sharing is admin only.'} ${normalizedGroupSettings.allowMemberPolls ? 'Members can create polls.' : 'Polls are admin only.'}`;
 
     const NotificationSection = ({ isGroupChat = false }) => (
         <section className="glass-card rounded-3xl p-5 sm:p-6">
@@ -413,7 +495,7 @@ export default function ChatDetailsDrawer({ mode, user: initialUser, chat, onClo
                             <div className="mt-6 space-y-4">
                                 <InfoRow
                                     label="Your Permission"
-                                    value={isCurrentUserGroupAdmin ? 'Admin - can add members and manage the group' : 'Member - can chat, join calls, and view group details'}
+                                    value={isCurrentUserGroupAdmin ? 'Admin - can manage members, invites, permissions, and disappearing timers' : 'Member - can chat within the current group rules and view shared details'}
                                 />
                                 <InfoRow
                                     label="Group Admin"
@@ -423,12 +505,232 @@ export default function ChatDetailsDrawer({ mode, user: initialUser, chat, onClo
                                 />
                                 <InfoRow
                                     label="What Members Can Do"
-                                    value={isCurrentUserGroupAdmin
-                                        ? 'You can add members. Everyone can message, react, share media, and join group calls.'
-                                        : 'Members can message, react, share media, and join group calls. Only admins can add members.'}
+                                    value={memberPermissionSummary}
                                 />
                             </div>
                         </section>
+
+                        <section className="glass-card rounded-3xl p-5 sm:p-6">
+                            <div className="flex items-center gap-2 mb-4">
+                                <Shield className="w-4 h-4 text-primary-400" />
+                                <h3 className="font-semibold text-sm">Group Controls</h3>
+                            </div>
+
+                            <div className="space-y-5">
+                                <div>
+                                    <p className="text-xs uppercase tracking-[0.18em] opacity-40 mb-2">Disappearing messages</p>
+                                    <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+                                        {disappearingOptions.map((option) => {
+                                            const isActive = (disappearingSettings.durationHours || 0) === option.value;
+                                            return (
+                                                <button
+                                                    key={option.value}
+                                                    onClick={() => persistGroupControls({ disappearingMessages: { durationHours: option.value } })}
+                                                    disabled={!isCurrentUserGroupAdmin}
+                                                    className={`badge-pill whitespace-nowrap transition-all ${isActive ? 'text-white shadow-[0_10px_22px_rgba(111,107,255,0.24)]' : ''} ${!isCurrentUserGroupAdmin ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                                    style={isActive ? { background: 'var(--gradient-primary)' } : undefined}
+                                                >
+                                                    <Clock3 className="w-3.5 h-3.5" />
+                                                    {option.label}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                    <p className="text-xs opacity-45 mt-2">
+                                        New messages follow this timer. Existing messages keep their current state.
+                                    </p>
+                                </div>
+
+                                <div>
+                                    <p className="text-xs uppercase tracking-[0.18em] opacity-40 mb-2">Slow mode</p>
+                                    <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+                                        {slowModeOptions.map((option) => {
+                                            const isActive = (normalizedGroupSettings.slowModeSeconds || 0) === option.value;
+                                            return (
+                                                <button
+                                                    key={option.value}
+                                                    onClick={() => persistGroupControls({ groupSettings: { slowModeSeconds: option.value } })}
+                                                    disabled={!isCurrentUserGroupAdmin}
+                                                    className={`badge-pill whitespace-nowrap transition-all ${isActive ? 'text-white shadow-[0_10px_22px_rgba(111,107,255,0.24)]' : ''} ${!isCurrentUserGroupAdmin ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                                    style={isActive ? { background: 'var(--gradient-primary)' } : undefined}
+                                                >
+                                                    {option.label}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    {[
+                                        {
+                                            key: 'adminOnlyMessages',
+                                            title: 'Admin-only posting',
+                                            description: 'Only admins can send messages while this is enabled.',
+                                            active: normalizedGroupSettings.adminOnlyMessages,
+                                        },
+                                        {
+                                            key: 'allowMemberMedia',
+                                            title: 'Member media sharing',
+                                            description: 'Allow members to upload photos, videos, docs, and voice notes.',
+                                            active: normalizedGroupSettings.allowMemberMedia,
+                                        },
+                                        {
+                                            key: 'allowMemberPolls',
+                                            title: 'Member polls',
+                                            description: 'Allow members to create polls in the group.',
+                                            active: normalizedGroupSettings.allowMemberPolls,
+                                        },
+                                        {
+                                            key: 'joinApprovalEnabled',
+                                            title: 'Join approval',
+                                            description: 'Require admin approval before invite-link joins become members.',
+                                            active: normalizedGroupSettings.joinApprovalEnabled,
+                                        },
+                                    ].map((setting) => (
+                                        <button
+                                            key={setting.key}
+                                            onClick={() => persistGroupControls({ groupSettings: { [setting.key]: !setting.active } })}
+                                            disabled={!isCurrentUserGroupAdmin}
+                                            className={`rounded-2xl border px-4 py-4 text-left transition-colors ${setting.active ? 'border-primary-400/30 bg-primary-500/10 text-primary-100' : 'border-white/8 bg-white/5 hover:bg-white/8'} ${!isCurrentUserGroupAdmin ? 'opacity-70 cursor-not-allowed' : ''}`}
+                                        >
+                                            <div className="flex items-center justify-between gap-3 mb-2">
+                                                <p className="text-sm font-semibold">{setting.title}</p>
+                                                <span className={`badge-pill ${setting.active ? '!bg-primary-500/15 !text-primary-200' : ''}`}>
+                                                    {setting.active ? 'On' : 'Off'}
+                                                </span>
+                                            </div>
+                                            <p className="text-xs opacity-55 leading-5">{setting.description}</p>
+                                        </button>
+                                    ))}
+                                </div>
+
+                                {!isCurrentUserGroupAdmin && (
+                                    <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-3 text-sm opacity-60">
+                                        Only the current group admin can change these controls.
+                                    </div>
+                                )}
+                            </div>
+                        </section>
+
+                        <section className="glass-card rounded-3xl p-5 sm:p-6">
+                            <div className="flex items-center justify-between gap-3 mb-4">
+                                <div className="flex items-center gap-2">
+                                    <UserPlus className="w-4 h-4 text-primary-400" />
+                                    <h3 className="font-semibold text-sm">Invite Links</h3>
+                                </div>
+                                {isCurrentUserGroupAdmin && (
+                                    <button
+                                        onClick={handleCreateInviteLink}
+                                        className="btn-glass px-3 py-2 text-sm whitespace-nowrap"
+                                    >
+                                        Create link
+                                    </button>
+                                )}
+                            </div>
+
+                            <div className="space-y-3">
+                                {activeInviteLinks.length > 0 ? activeInviteLinks.map((inviteLink) => (
+                                    <div key={inviteLink.code} className="rounded-2xl border border-white/8 bg-white/5 p-4">
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div className="min-w-0">
+                                                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                                    <p className="text-sm font-semibold truncate">Invite code</p>
+                                                    <span className="badge-pill">{inviteLink.code}</span>
+                                                </div>
+                                                <p className="text-xs opacity-45 break-all">
+                                                    {inviteLink.url || `${window.location.origin.replace(/\/$/, '')}/join/${inviteLink.code}`}
+                                                </p>
+                                                <p className="text-[11px] opacity-35 mt-2">
+                                                    Created {new Date(inviteLink.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
+                                                </p>
+                                            </div>
+                                            <div className="flex items-center gap-2 flex-shrink-0">
+                                                <button
+                                                    onClick={() => handleCopyInviteLink(inviteLink)}
+                                                    className="p-2 rounded-xl hover:bg-white/5"
+                                                    title="Copy invite link"
+                                                >
+                                                    <Copy className="w-4 h-4 text-primary-300" />
+                                                </button>
+                                                {isCurrentUserGroupAdmin && (
+                                                    <button
+                                                        onClick={() => revokeInviteLink(chat._id, inviteLink.code).catch(() => { })}
+                                                        className="p-2 rounded-xl hover:bg-red-500/10 text-red-300"
+                                                        title="Revoke invite link"
+                                                    >
+                                                        <Link2Off className="w-4 h-4" />
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )) : (
+                                    <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 p-4 text-sm opacity-60">
+                                        {isCurrentUserGroupAdmin ? 'Create an invite link to let people join the group.' : 'No active invite links are visible to members right now.'}
+                                    </div>
+                                )}
+                            </div>
+                        </section>
+
+                        {(isCurrentUserGroupAdmin || pendingJoinRequests.length > 0) && (
+                            <section className="glass-card rounded-3xl p-5 sm:p-6">
+                                <div className="flex items-center gap-2 mb-4">
+                                    <Users className="w-4 h-4 text-primary-400" />
+                                    <h3 className="font-semibold text-sm">Pending Join Requests</h3>
+                                </div>
+
+                                <div className="space-y-3">
+                                    {pendingJoinRequests.length > 0 ? pendingJoinRequests.map((request) => {
+                                        const requester = request.userId;
+                                        return (
+                                            <div key={requester?._id || request.viaCode} className="rounded-2xl border border-white/8 bg-white/5 p-4">
+                                                <div className="flex items-center justify-between gap-3">
+                                                    <div className="flex items-center gap-3 min-w-0">
+                                                        <div className="w-11 h-11 rounded-full overflow-hidden ring-1 ring-white/10 flex-shrink-0">
+                                                            {requester?.avatar ? (
+                                                                <img src={requester.avatar} alt={requester.name} className="w-full h-full object-cover" />
+                                                            ) : (
+                                                                <AvatarFallback name={requester?.name || 'User'} className="text-sm" />
+                                                            )}
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <p className="text-sm font-semibold truncate">{requester?.name || 'Pending member'}</p>
+                                                            <p className="text-xs opacity-45 truncate">
+                                                                {requester?.username ? `@${requester.username}` : 'Invite request'}
+                                                            </p>
+                                                            <p className="text-[11px] opacity-35 mt-1">
+                                                                Requested {new Date(request.requestedAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                    {isCurrentUserGroupAdmin && requester?._id && (
+                                                        <div className="flex items-center gap-2 flex-shrink-0">
+                                                            <button
+                                                                onClick={() => reviewJoinRequest(chat._id, requester._id, 'accept').catch(() => { })}
+                                                                className="btn-glass px-3 py-2 text-sm"
+                                                            >
+                                                                Accept
+                                                            </button>
+                                                            <button
+                                                                onClick={() => reviewJoinRequest(chat._id, requester._id, 'reject').catch(() => { })}
+                                                                className="px-3 py-2 rounded-2xl border border-red-400/20 bg-red-500/10 text-red-200 text-sm hover:bg-red-500/15 transition-colors"
+                                                            >
+                                                                Reject
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    }) : (
+                                        <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 p-4 text-sm opacity-60">
+                                            No pending requests right now.
+                                        </div>
+                                    )}
+                                </div>
+                            </section>
+                        )}
 
                         <section className="glass-card rounded-3xl p-5 sm:p-6">
                             <div className="flex items-center gap-2 mb-4">
@@ -499,8 +801,8 @@ export default function ChatDetailsDrawer({ mode, user: initialUser, chat, onClo
 
                             <div className="space-y-3">
                                 {groupParticipants.map((participant) => {
-                                    const role = groupAdminId === participant._id ? 'Admin' : 'Member';
-                                    const isSelf = participant._id === currentUser?._id;
+                                    const role = `${groupAdminId}` === `${participant._id}` ? 'Admin' : 'Member';
+                                    const isSelf = `${participant._id}` === `${currentUser?._id}`;
 
                                     return (
                                         <div key={participant._id} className="rounded-2xl border border-white/8 bg-white/5 p-4">

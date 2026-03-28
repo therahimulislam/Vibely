@@ -9,6 +9,7 @@ const Chat = require('../models/Chat');
 const Status = require('../models/Status');
 const { deleteImage } = require('./cloudinaryService');
 const { sanitizeMessageForViewer } = require('../utils/messageVisibility');
+const { ensureCanPostInGroup, getMessageExpiryForChat } = require('../utils/chatRules');
 
 const MESSAGE_SENDER_FIELDS = 'name avatar username';
 const REPLY_PREVIEW_FIELDS = 'text type fileUrl fileName createdAt isDeleted poll forwardedFrom';
@@ -57,7 +58,7 @@ const normalizeReminder = (reminder, userId) => {
     };
 };
 
-const canDeliverScheduledMessage = (chat, senderId) => {
+const canDeliverScheduledMessage = async (chat, senderId, messageType = 'text') => {
     if (!chat || !chat.participants.some((participantId) => participantId.toString() === senderId.toString())) {
         return false;
     }
@@ -68,6 +69,17 @@ const canDeliverScheduledMessage = (chat, senderId) => {
 
     if (!chat.isGroup && chat.requestStatus === 'pending' && chat.requestedBy?.toString() !== senderId.toString()) {
         return false;
+    }
+
+    if (chat.isGroup) {
+        try {
+            await ensureCanPostInGroup(chat, senderId, {
+                messageType,
+                skipSlowMode: true,
+            });
+        } catch (error) {
+            return false;
+        }
     }
 
     return true;
@@ -135,7 +147,7 @@ const dispatchDueScheduledMessages = async (io) => {
         try {
             const chat = await Chat.findById(scheduledMessage.chatId);
 
-            if (!canDeliverScheduledMessage(chat, scheduledMessage.senderId)) {
+            if (!(await canDeliverScheduledMessage(chat, scheduledMessage.senderId, scheduledMessage.type))) {
                 if (scheduledMessage.publicId) {
                     await deleteImage(
                         scheduledMessage.publicId,
@@ -162,6 +174,7 @@ const dispatchDueScheduledMessages = async (io) => {
                     durationSeconds: scheduledMessage.viewOnce?.durationSeconds || 10,
                     views: [],
                 },
+                expiresAt: getMessageExpiryForChat(chat),
                 status: 'sent',
             });
 
@@ -218,34 +231,13 @@ const initCronJobs = (io) => {
                 }
             }
 
-            // 1. Delete media (images/videos) older than 24 hours
-            const mediaExpiration = new Date(now.getTime() - 24 * 60 * 60 * 1000); // 24 hours ago
-
-            const mediaMessages = await Message.find({
-                type: { $in: ['image', 'video'] },
-                createdAt: { $lt: mediaExpiration },
+            const expiredMessages = await Message.find({
+                expiresAt: { $ne: null, $lte: now },
             });
 
-            if (mediaMessages.length > 0) {
-                console.log(`Found ${mediaMessages.length} expired media messages`);
-                for (const msg of mediaMessages) {
-                    if (msg.publicId) {
-                        await deleteImage(msg.publicId, getMediaResourceType(msg.type, msg.mediaResourceType));
-                    }
-                    await Message.findByIdAndDelete(msg._id);
-                }
-            }
-
-            // 2. Delete EVERYTHING older than 7 days (text, documents, etc)
-            const globalExpiration = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000); // 7 days ago
-
-            const oldMessages = await Message.find({
-                createdAt: { $lt: globalExpiration }
-            });
-
-            if (oldMessages.length > 0) {
-                console.log(`Found ${oldMessages.length} expired old messages`);
-                for (const msg of oldMessages) {
+            if (expiredMessages.length > 0) {
+                console.log(`Found ${expiredMessages.length} expired disappearing messages`);
+                for (const msg of expiredMessages) {
                     if (msg.publicId) {
                         await deleteImage(msg.publicId, getMediaResourceType(msg.type, msg.mediaResourceType));
                     }

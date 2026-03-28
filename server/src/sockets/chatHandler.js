@@ -3,6 +3,7 @@
 const Message = require('../models/Message');
 const Chat = require('../models/Chat');
 const { sanitizeMessageForViewer } = require('../utils/messageVisibility');
+const { ensureCanPostInGroup, getMessageExpiryForChat } = require('../utils/chatRules');
 
 module.exports = (io, socket, onlineUsers) => {
     const senderFields = 'name avatar username';
@@ -75,6 +76,8 @@ module.exports = (io, socket, onlineUsers) => {
                 return;
             }
 
+            await ensureCanPostInGroup(chat, socket.userId, { messageType: 'text' });
+
             let replyMessageId = null;
             if (replyTo) {
                 const replyMessage = await Message.findOne({ _id: replyTo, chatId });
@@ -90,6 +93,7 @@ module.exports = (io, socket, onlineUsers) => {
                 senderId: socket.userId,
                 text: normalizedText,
                 replyTo: replyMessageId,
+                expiresAt: getMessageExpiryForChat(chat),
                 status: 'sent',
             });
 
@@ -268,6 +272,10 @@ module.exports = (io, socket, onlineUsers) => {
         try {
             const message = await Message.findById(messageId);
             if (!message || message.senderId.toString() !== socket.userId) return;
+            if (message.expiresAt && new Date(message.expiresAt).getTime() <= Date.now()) {
+                socket.emit('messageError', { error: 'Message not found' });
+                return;
+            }
 
             const chat = await getChatForUser(message.chatId);
             if (!chat) return;

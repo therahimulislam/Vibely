@@ -15,6 +15,7 @@ router.post('/contacts/:id', userController.addContact);
 router.delete('/contacts/:id', userController.removeContact);
 router.put('/chat-folders', userController.updateChatFolders);
 router.put('/chat-notifications', userController.updateChatNotifications);
+router.put('/chat-draft', userController.updateChatDraft);
 router.get('/:id', userController.getUserById);
 router.put('/profile', upload.single('avatar'), userController.updateProfile);
 

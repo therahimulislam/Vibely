@@ -6,6 +6,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { GoogleOAuthProvider } from '@react-oauth/google';
 import { Toaster } from 'react-hot-toast';
 import useAuthStore from './store/useAuthStore';
+import useThemeStore from './store/useThemeStore';
 import useSocket from './hooks/useSocket';
 import { applyChatThemePreset, DEFAULT_CHAT_THEME } from './utils/themePresets';
 
@@ -55,6 +56,7 @@ const RouteLoader = () => (
 
 function AppContent() {
     useSocket(); // Initialize socket connection
+    const theme = useThemeStore((state) => state.theme);
 
     return (
         <>
@@ -65,6 +67,7 @@ function AppContent() {
                     <Route path="/verify-otp" element={<VerifyOTP />} />
                     <Route path="/forgot-password" element={<AuthRoute><ForgotPassword /></AuthRoute>} />
                     <Route path="/" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
+                    <Route path="/join/:code" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
                     <Route path="/settings/sessions" element={<ProtectedRoute><ManageSessions /></ProtectedRoute>} />
                     <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
@@ -76,10 +79,10 @@ function AppContent() {
                 toastOptions={{
                     duration: 3000,
                     style: {
-                        background: 'rgba(30, 30, 60, 0.9)',
-                        color: '#e2e8f0',
+                        background: theme === 'dark' ? 'rgba(30, 30, 60, 0.9)' : 'rgba(255, 255, 255, 0.92)',
+                        color: theme === 'dark' ? '#e2e8f0' : '#131929',
                         backdropFilter: 'blur(10px)',
-                        border: '1px solid rgba(255, 255, 255, 0.1)',
+                        border: theme === 'dark' ? '1px solid rgba(255, 255, 255, 0.1)' : '1px solid rgba(214, 220, 244, 0.72)',
                         borderRadius: '12px',
                         fontSize: '14px',
                     },
@@ -91,23 +94,16 @@ function AppContent() {
 
 export default function App() {
     const { initialize, user } = useAuthStore();
-    const [isDark, setIsDark] = useState(() => {
-        const saved = localStorage.getItem('theme');
-        return saved ? saved === 'dark' : true;
-    });
+    const theme = useThemeStore((state) => state.theme);
+    const initializeTheme = useThemeStore((state) => state.initializeTheme);
+    const toggleTheme = useThemeStore((state) => state.toggleTheme);
     const [chatTheme, setChatTheme] = useState(() => localStorage.getItem('chatThemePreset') || DEFAULT_CHAT_THEME);
 
     // Initialize auth
     useEffect(() => {
         initialize();
-    }, []);
-
-    // Apply theme
-    useEffect(() => {
-        document.body.classList.toggle('dark', isDark);
-        document.documentElement.classList.toggle('dark', isDark);
-        localStorage.setItem('theme', isDark ? 'dark' : 'light');
-    }, [isDark]);
+        initializeTheme();
+    }, [initialize, initializeTheme]);
 
     useEffect(() => {
         const userTheme = user?.preferences?.chatTheme;
@@ -124,8 +120,8 @@ export default function App() {
     }, [chatTheme]);
 
     // Expose theme toggle globally
-    window.__toggleTheme = () => setIsDark((d) => !d);
-    window.__isDark = isDark;
+    window.__toggleTheme = toggleTheme;
+    window.__isDark = theme === 'dark';
     window.__setChatTheme = (theme) => setChatTheme(theme || DEFAULT_CHAT_THEME);
 
     return (

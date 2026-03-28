@@ -13,6 +13,10 @@ const {
     hasViewedViewOnce,
     sameId,
 } = require('../utils/messageVisibility');
+const {
+    ensureCanPostInGroup,
+    getMessageExpiryForChat,
+} = require('../utils/chatRules');
 
 const MESSAGE_SENDER_FIELDS = 'name avatar username';
 const REPLY_PREVIEW_FIELDS = 'text type fileUrl fileName createdAt isDeleted poll forwardedFrom viewOnce';
@@ -27,6 +31,29 @@ const getMediaResourceType = (messageType = 'image') => {
     if (messageType === 'document') return 'raw';
     if (messageType === 'video' || messageType === 'audio') return 'video';
     return 'image';
+};
+const getExpiryVisibilityCondition = (now = new Date()) => ({
+    $or: [
+        { expiresAt: null },
+        { expiresAt: { $gt: now } },
+    ],
+});
+const getVisibleMessageConditions = (userId, now = new Date()) => ({
+    deletedFor: { $ne: userId },
+    ...getExpiryVisibilityCondition(now),
+});
+const getIncomingMessageType = (body = {}, file = null) => {
+    if (!file) return 'text';
+    if (body.type === 'document') return 'document';
+    if (body.type === 'audio' || file.mimetype?.startsWith('audio/')) return 'audio';
+    if (file.mimetype?.startsWith('image/')) return 'image';
+    if (file.mimetype?.startsWith('video/')) return 'video';
+    return 'document';
+};
+const ensureMessageNotExpired = (message) => {
+    if (message?.expiresAt && new Date(message.expiresAt).getTime() <= Date.now()) {
+        throw Object.assign(new Error('Message not found'), { statusCode: 404 });
+    }
 };
 const parseViewOncePayload = (body = {}, messageType = '') => {
     const requested = body.viewOnce === true || `${body.viewOnce}` === 'true';
@@ -131,6 +158,11 @@ const ensureChatAccessForMessages = async (chatId, userId) => {
     ensureDirectChatCanSend(chat, userId);
     return chat;
 };
+const ensureChatCanCreateMessage = async (chat, userId, { messageType = 'text', skipSlowMode = false } = {}) => {
+    ensureDirectChatCanSend(chat, userId);
+    await ensureCanPostInGroup(chat, userId, { messageType, skipSlowMode });
+    return chat;
+};
 
 const ensureCanPinMessage = (chat, userId) => {
     if (!chat.isGroup) return;
@@ -153,7 +185,7 @@ exports.getMessages = async (req, res) => {
 
         const messages = await Message.find({
             chatId,
-            deletedFor: { $ne: req.userId }, // Exclude deleted-for-me messages
+            ...getVisibleMessageConditions(req.userId), // Exclude deleted-for-me and expired messages
         })
             .sort({ createdAt: -1 })
             .skip(skip)
@@ -171,7 +203,7 @@ exports.getMessages = async (req, res) => {
 
         const visibleTotal = await Message.countDocuments({
             chatId,
-            deletedFor: { $ne: req.userId },
+            ...getVisibleMessageConditions(req.userId),
         });
 
         res.json({
@@ -208,6 +240,7 @@ exports.searchMessages = async (req, res) => {
             chatId,
             deletedFor: { $ne: req.userId },
         };
+        const andConditions = [getExpiryVisibilityCondition()];
 
         if (chat.isGroup && senderId) {
             const senderIsParticipant = chat.participants.some((participantId) => participantId.toString() === senderId.toString());
@@ -231,12 +264,14 @@ exports.searchMessages = async (req, res) => {
         const normalizedQuery = query.trim();
         if (normalizedQuery) {
             const regex = new RegExp(escapeRegExp(normalizedQuery), 'i');
-            conditions.$or = [
+            andConditions.push({
+                $or: [
                 { text: regex },
                 { fileName: regex },
                 { 'poll.question': regex },
                 { 'forwardedFrom.senderName': regex },
-            ];
+                ],
+            });
         }
 
         switch (filter) {
@@ -265,6 +300,10 @@ exports.searchMessages = async (req, res) => {
                 break;
         }
 
+        if (andConditions.length > 0) {
+            conditions.$and = andConditions;
+        }
+
         const results = await Message.find(conditions)
             .sort({ createdAt: -1 })
             .limit(normalizedLimit)
@@ -290,8 +329,15 @@ exports.sendMessage = async (req, res) => {
     try {
         const { chatId, text, replyTo } = req.body;
         const normalizedText = typeof text === 'string' ? text.trim() : '';
-        const chat = await ensureChatAccessForMessages(chatId, req.userId);
+        const chat = await ensureChatParticipant(chatId, req.userId);
+        const incomingMessageType = getIncomingMessageType(req.body, req.file);
         const replyMessage = await getReplyMessage(chatId, replyTo);
+
+        if (!normalizedText && !req.file) {
+            return res.status(400).json({ error: 'Message must have text or media' });
+        }
+
+        await ensureChatCanCreateMessage(chat, req.userId, { messageType: incomingMessageType });
 
         // Handle file upload
         let fileData = {
@@ -335,10 +381,6 @@ exports.sendMessage = async (req, res) => {
             return res.status(400).json({ error: 'View-once is only available for photos and videos' });
         }
 
-        if (!normalizedText && !fileData.fileUrl) {
-            return res.status(400).json({ error: 'Message must have text or media' });
-        }
-
         const message = await Message.create({
             chatId,
             senderId: req.userId,
@@ -346,6 +388,7 @@ exports.sendMessage = async (req, res) => {
             replyTo: replyMessage?._id || null,
             ...fileData,
             viewOnce: viewOnce.config,
+            expiresAt: getMessageExpiryForChat(chat),
             status: 'sent',
         });
 
@@ -370,7 +413,8 @@ exports.scheduleMessage = async (req, res) => {
     try {
         const { chatId, text, replyTo, scheduledFor } = req.body;
         const normalizedText = typeof text === 'string' ? text.trim() : '';
-        await ensureChatAccessForMessages(chatId, req.userId);
+        const chat = await ensureChatParticipant(chatId, req.userId);
+        const incomingMessageType = getIncomingMessageType(req.body, req.file);
         const replyMessage = await getReplyMessage(chatId, replyTo);
         const deliveryAt = new Date(scheduledFor);
 
@@ -381,6 +425,15 @@ exports.scheduleMessage = async (req, res) => {
         if (deliveryAt.getTime() <= Date.now() + 15000) {
             return res.status(400).json({ error: 'Scheduled time must be in the future' });
         }
+
+        if (!normalizedText && !req.file) {
+            return res.status(400).json({ error: 'Message must have text or media' });
+        }
+
+        await ensureChatCanCreateMessage(chat, req.userId, {
+            messageType: incomingMessageType,
+            skipSlowMode: true,
+        });
 
         let fileData = {
             fileUrl: '',
@@ -419,10 +472,6 @@ exports.scheduleMessage = async (req, res) => {
         const viewOnce = parseViewOncePayload(req.body, fileData.type);
         if (viewOnce.requested && !viewOnce.config.enabled) {
             return res.status(400).json({ error: 'View-once is only available for photos and videos' });
-        }
-
-        if (!normalizedText && !fileData.fileUrl) {
-            return res.status(400).json({ error: 'Message must have text or media' });
         }
 
         const scheduledMessage = await ScheduledMessage.create({
@@ -513,6 +562,11 @@ exports.updateScheduledMessage = async (req, res) => {
         }
 
         await ensureChatAccessForMessages(scheduledMessage.chatId, req.userId);
+        const chat = await ensureChatParticipant(scheduledMessage.chatId, req.userId);
+        await ensureChatCanCreateMessage(chat, req.userId, {
+            messageType: scheduledMessage.type || 'text',
+            skipSlowMode: true,
+        });
 
         if (typeof req.body.text === 'string') {
             scheduledMessage.text = req.body.text.trim();
@@ -551,7 +605,7 @@ exports.getPinnedMessages = async (req, res) => {
             chatId,
             isPinned: true,
             isDeleted: { $ne: true },
-            deletedFor: { $ne: req.userId },
+            ...getVisibleMessageConditions(req.userId),
         })
             .sort({ pinnedAt: -1, createdAt: -1 })
             .populate('senderId', MESSAGE_SENDER_FIELDS)
@@ -589,6 +643,10 @@ exports.markAsSeen = async (req, res) => {
                 chatId,
                 senderId: { $ne: req.userId },
                 status: { $ne: 'seen' },
+                $or: [
+                    { expiresAt: null },
+                    { expiresAt: { $gt: new Date() } },
+                ],
             },
             { status: 'seen' }
         );
@@ -610,6 +668,7 @@ exports.editMessage = async (req, res) => {
         if (!message) {
             return res.status(404).json({ error: 'Message not found' });
         }
+        ensureMessageNotExpired(message);
 
         if (message.senderId.toString() !== req.userId.toString()) {
             return res.status(403).json({ error: 'Can only edit your own messages' });
@@ -625,10 +684,10 @@ exports.editMessage = async (req, res) => {
         message.isEdited = true;
         await message.save();
 
-        const populated = await Message.findById(message._id).populate('senderId', MESSAGE_SENDER_FIELDS);
-        res.json({ message: populated });
+        const populated = await populateMessage(message._id);
+        res.json({ message: sanitizeMessageForViewer(populated, req.userId) });
     } catch (error) {
-        res.status(500).json({ error: 'Server error' });
+        res.status(error.statusCode || 500).json({ error: error.message || 'Server error' });
     }
 };
 
@@ -641,6 +700,7 @@ exports.deleteMessage = async (req, res) => {
         if (!message) {
             return res.status(404).json({ error: 'Message not found' });
         }
+        ensureMessageNotExpired(message);
 
         if (type === 'everyone') {
             if (message.senderId.toString() !== req.userId.toString()) {
@@ -679,6 +739,7 @@ exports.openViewOnceMessage = async (req, res) => {
         if (!message || message.isDeleted || message.deletedFor?.some((entry) => sameId(entry, req.userId))) {
             return res.status(404).json({ error: 'Message not found' });
         }
+        ensureMessageNotExpired(message);
 
         if (!message.viewOnce?.enabled || !['image', 'video'].includes(message.type)) {
             return res.status(400).json({ error: 'This message is not protected media' });
@@ -724,6 +785,7 @@ exports.addReaction = async (req, res) => {
         if (!message) {
             return res.status(404).json({ error: 'Message not found' });
         }
+        ensureMessageNotExpired(message);
 
         const chat = await Chat.findOne({
             _id: message.chatId,
@@ -768,6 +830,7 @@ exports.toggleStar = async (req, res) => {
         if (!message) {
             return res.status(404).json({ error: 'Message not found' });
         }
+        ensureMessageNotExpired(message);
 
         const chat = await Chat.findOne({
             _id: message.chatId,
@@ -801,6 +864,7 @@ exports.togglePinMessage = async (req, res) => {
         if (!message) {
             return res.status(404).json({ error: 'Message not found' });
         }
+        ensureMessageNotExpired(message);
         if (message.isDeleted || message.deletedFor?.some((entry) => entry.toString() === req.userId.toString())) {
             return res.status(400).json({ error: 'Deleted messages cannot be pinned' });
         }
@@ -841,6 +905,7 @@ exports.forwardMessage = async (req, res) => {
         if (!originalMessage || originalMessage.isDeleted) {
             return res.status(404).json({ error: 'Message not found' });
         }
+        ensureMessageNotExpired(originalMessage);
 
         const sourceChat = await Chat.findOne({
             _id: originalMessage.chatId,
@@ -864,6 +929,7 @@ exports.forwardMessage = async (req, res) => {
         }
 
         ensureDirectChatCanSend(targetChat, req.userId);
+        await ensureCanPostInGroup(targetChat, req.userId, { messageType: originalMessage.type || 'text' });
 
         const message = await Message.create({
             chatId,
@@ -889,6 +955,7 @@ exports.forwardMessage = async (req, res) => {
                 messageId: originalMessage._id,
                 senderName: originalMessage.forwardedFrom?.senderName || originalMessage.senderId?.name || 'Unknown',
             },
+            expiresAt: getMessageExpiryForChat(targetChat),
             status: 'sent',
         });
 
@@ -920,6 +987,7 @@ exports.createPoll = async (req, res) => {
         if (!chat) {
             return res.status(403).json({ error: 'Only group members can create polls' });
         }
+        await ensureCanPostInGroup(chat, req.userId, { messageType: 'poll' });
 
         const normalizedQuestion = question?.trim();
         const normalizedOptions = options
@@ -939,6 +1007,7 @@ exports.createPoll = async (req, res) => {
             chatId,
             senderId: req.userId,
             type: 'poll',
+            expiresAt: getMessageExpiryForChat(chat),
             poll: {
                 question: normalizedQuestion,
                 options: normalizedOptions.map((option) => ({
@@ -953,15 +1022,15 @@ exports.createPoll = async (req, res) => {
         await updateChatAfterMessage(chat, req.userId, message._id);
         const populatedMessage = await populateMessage(message._id);
 
-        emitToChatParticipants(req, chat, 'receiveMessage', {
-            message: populatedMessage,
+        emitToChatParticipants(req, chat, 'receiveMessage', (viewerId) => ({
+            message: sanitizeMessageForViewer(populatedMessage, viewerId),
             chatId,
-        }, req.userId);
+        }), req.userId);
 
-        res.status(201).json({ message: populatedMessage });
+        res.status(201).json({ message: sanitizeMessageForViewer(populatedMessage, req.userId) });
     } catch (error) {
         console.error('Create poll error:', error);
-        res.status(500).json({ error: 'Server error' });
+        res.status(error.statusCode || 500).json({ error: error.message || 'Server error' });
     }
 };
 
@@ -974,6 +1043,7 @@ exports.votePoll = async (req, res) => {
         if (!message || message.type !== 'poll') {
             return res.status(404).json({ error: 'Poll not found' });
         }
+        ensureMessageNotExpired(message);
 
         const chat = await Chat.findOne({
             _id: message.chatId,
@@ -998,11 +1068,13 @@ exports.votePoll = async (req, res) => {
         await message.save();
 
         const populatedMessage = await populateMessage(message._id);
-        emitToChatParticipants(req, chat, 'messageUpdated', { message: populatedMessage }, null);
+        emitToChatParticipants(req, chat, 'messageUpdated', (viewerId) => ({
+            message: sanitizeMessageForViewer(populatedMessage, viewerId),
+        }), null);
 
-        res.json({ message: populatedMessage });
+        res.json({ message: sanitizeMessageForViewer(populatedMessage, req.userId) });
     } catch (error) {
         console.error('Vote poll error:', error);
-        res.status(500).json({ error: 'Server error' });
+        res.status(error.statusCode || 500).json({ error: error.message || 'Server error' });
     }
 };

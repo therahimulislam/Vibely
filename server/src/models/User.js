@@ -60,6 +60,26 @@ const chatNotificationSchema = new mongoose.Schema(
     { _id: false }
 );
 
+const chatDraftSchema = new mongoose.Schema(
+    {
+        chatId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Chat',
+            required: true,
+        },
+        text: {
+            type: String,
+            trim: true,
+            default: '',
+        },
+        updatedAt: {
+            type: Date,
+            default: Date.now,
+        },
+    },
+    { _id: false }
+);
+
 const userSchema = new mongoose.Schema(
     {
         name: {
@@ -135,6 +155,10 @@ const userSchema = new mongoose.Schema(
             },
             chatNotifications: {
                 type: [chatNotificationSchema],
+                default: [],
+            },
+            chatDrafts: {
+                type: [chatDraftSchema],
                 default: [],
             },
         },

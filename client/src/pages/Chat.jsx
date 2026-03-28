@@ -2,6 +2,7 @@
 // Main chat page with sidebar + message area layout
 
 import { useEffect, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import useChatStore from '../store/useChatStore';
 import Sidebar from '../components/layout/Sidebar';
 import MessageArea from '../components/chat/MessageArea';
@@ -11,13 +12,27 @@ import { MessageCircle } from 'lucide-react';
 import ErrorBoundary from '../components/ErrorBoundary';
 
 export default function Chat() {
-    const { fetchChats, activeChat } = useChatStore();
+    const { fetchChats, activeChat, joinGroupViaInvite } = useChatStore();
     const [profileView, setProfileView] = useState(null);
     const [showSidebar, setShowSidebar] = useState(true);
+    const [handledInviteCode, setHandledInviteCode] = useState('');
+    const navigate = useNavigate();
+    const { code: inviteCode } = useParams();
 
     useEffect(() => {
         fetchChats();
     }, []);
+
+    useEffect(() => {
+        if (!inviteCode || handledInviteCode === inviteCode) return;
+        setHandledInviteCode(inviteCode);
+
+        joinGroupViaInvite(inviteCode)
+            .catch(() => { })
+            .finally(() => {
+                navigate('/', { replace: true });
+            });
+    }, [inviteCode, handledInviteCode, joinGroupViaInvite, navigate]);
 
     // On mobile, hide sidebar when chat is active
     useEffect(() => {

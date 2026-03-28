@@ -41,6 +41,10 @@ const normalizeChatNotificationPayload = (payload = {}) => {
         desktop: !!payload.desktop,
     };
 };
+const normalizeChatDraftPayload = (payload = {}) => ({
+    chatId: payload.chatId?.toString?.() || '',
+    text: `${payload.text || ''}`.slice(0, 4000),
+});
 const cleanupTempFile = (filePath) => {
     if (filePath) {
         fs.unlink(filePath, () => { });
@@ -291,6 +295,48 @@ exports.updateChatNotifications = async (req, res) => {
                 sound: 'default',
                 desktop: false,
             },
+            user,
+        });
+    } catch (error) {
+        res.status(500).json({ error: 'Server error' });
+    }
+};
+
+exports.updateChatDraft = async (req, res) => {
+    try {
+        const draft = normalizeChatDraftPayload(req.body);
+        if (!draft.chatId) {
+            return res.status(400).json({ error: 'Chat ID is required' });
+        }
+
+        const chat = await Chat.findOne({
+            _id: draft.chatId,
+            participants: req.userId,
+        });
+
+        if (!chat) {
+            return res.status(400).json({ error: 'Chat not found' });
+        }
+
+        const user = await User.findById(req.userId);
+        const currentDrafts = user?.preferences?.chatDrafts || [];
+        const filteredDrafts = currentDrafts.filter((entry) => entry.chatId?.toString() !== draft.chatId);
+
+        user.preferences.chatDrafts = draft.text.trim()
+            ? [
+                ...filteredDrafts,
+                {
+                    chatId: draft.chatId,
+                    text: draft.text,
+                    updatedAt: new Date(),
+                },
+            ]
+            : filteredDrafts;
+
+        await user.save();
+
+        res.json({
+            chatDrafts: user.preferences.chatDrafts || [],
             user,
         });
     } catch (error) {

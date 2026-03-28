@@ -6,12 +6,25 @@ import { Pin, Image, Users, BellRing, Archive, Bookmark } from 'lucide-react';
 import AvatarFallback from '../ui/AvatarFallback';
 import { motion } from 'framer-motion';
 
-export default function ChatItem({ chat, displayUser, isActive, isOnline, isTyping, unreadCount, isPinned, folderLabel = '', folderColor = '', onClick }) {
+export default function ChatItem({
+    chat,
+    displayUser,
+    isActive,
+    isOnline,
+    isTyping,
+    unreadCount,
+    isPinned,
+    folderLabel = '',
+    folderColor = '',
+    draftText = '',
+    onClick,
+}) {
     const lastMsg = chat.lastMessage;
     const requestedById = chat.requestedBy?._id || chat.requestedBy;
     const isIncomingRequest = chat.requestStatus === 'pending' && requestedById === displayUser._id;
     const emptyChatLabel = displayUser.isSavedMessages ? 'Keep notes, links, and forwards here' : displayUser.isGroup ? 'Group created' : 'No messages yet';
     const isArchived = chat.archivedBy?.length > 0;
+    const hasDraft = !!draftText.trim() && chat.requestStatus !== 'pending';
 
     return (
         <motion.button
@@ -89,6 +102,11 @@ export default function ChatItem({ chat, displayUser, isActive, isOnline, isTypi
                                     <span className="typing-dot w-1 h-1 rounded-full bg-primary-400 inline-block" />
                                     <span className="typing-dot w-1 h-1 rounded-full bg-primary-400 inline-block" />
                                 </span>
+                            </span>
+                        ) : hasDraft ? (
+                            <span className="flex items-center gap-1.5 text-amber-200">
+                                <span className="font-semibold">Draft:</span>
+                                <span className="truncate opacity-80">{formatMessagePreview(draftText)}</span>
                             </span>
                         ) : chat.requestStatus === 'pending' ? (
                             isIncomingRequest ? 'Message request' : 'Waiting for acceptance'

@@ -2,7 +2,7 @@
 // Main chat message area with header, messages, and input
 
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { ArrowLeft, Phone, Video, MoreVertical, Pin, Trash2, Search, Users, UserPlus, Check, X as CloseIcon, UserRoundMinus, Archive, ArchiveRestore, Bookmark, Image as ImageIcon, FileText, Mic, Link2, Filter } from 'lucide-react';
+import { ArrowLeft, Phone, Video, MoreVertical, Pin, Trash2, Search, Users, UserPlus, Check, X as CloseIcon, UserRoundMinus, Archive, ArchiveRestore, Bookmark, Image as ImageIcon, FileText, Mic, Link2, Filter, Clock3, Shield } from 'lucide-react';
 import useChatStore from '../../store/useChatStore';
 import useAuthStore from '../../store/useAuthStore';
 import useStatusStore from '../../store/useStatusStore';
@@ -88,6 +88,24 @@ export default function MessageArea({ onBack, onProfileClick }) {
     const isArchived = activeChat?.archivedBy?.includes(user._id);
     const isPendingRequest = !activeChat?.isGroup && !isSavedMessagesChat && activeChat?.requestStatus === 'pending';
     const isRequester = activeChat?.requestedBy?._id === user._id || activeChat?.requestedBy === user._id;
+    const groupAdminId = activeChat?.groupAdmin?._id || activeChat?.groupAdmin || null;
+    const isCurrentUserGroupAdmin = !!activeChat?.isGroup && `${groupAdminId}` === `${user._id}`;
+    const groupSettings = activeChat?.groupSettings || {};
+    const disappearingMessages = activeChat?.disappearingMessages || {};
+    const formatDisappearingLabel = (hours) => {
+        if (!hours) return 'Disappearing off';
+        if (hours === 24) return '24h disappear';
+        if (hours === 168) return '7d disappear';
+        if (hours === 2160) return '90d disappear';
+        return `${hours}h disappear`;
+    };
+    const formatSlowModeLabel = (seconds) => {
+        if (!seconds) return '';
+        if (seconds < 60) return `${seconds}s slow mode`;
+        if (seconds % 3600 === 0) return `${seconds / 3600}h slow mode`;
+        if (seconds % 60 === 0) return `${seconds / 60}m slow mode`;
+        return `${seconds}s slow mode`;
+    };
     const openChatDetails = () => onProfileClick?.(
         isSavedMessagesChat
             ? { mode: 'self' }
@@ -95,6 +113,39 @@ export default function MessageArea({ onBack, onProfileClick }) {
             ? { mode: 'group', chat: activeChat }
             : { mode: 'user', user: otherUser, chat: activeChat }
     );
+    const groupPolicyBadges = [];
+    if (chatInfo.isGroup && disappearingMessages?.enabled) {
+        groupPolicyBadges.push({
+            key: 'disappearing',
+            icon: Clock3,
+            label: formatDisappearingLabel(disappearingMessages.durationHours),
+            tone: 'primary',
+        });
+    }
+    if (chatInfo.isGroup && groupSettings?.slowModeSeconds > 0) {
+        groupPolicyBadges.push({
+            key: 'slow-mode',
+            icon: Clock3,
+            label: formatSlowModeLabel(groupSettings.slowModeSeconds),
+            tone: 'neutral',
+        });
+    }
+    if (chatInfo.isGroup && groupSettings?.adminOnlyMessages) {
+        groupPolicyBadges.push({
+            key: 'admin-posting',
+            icon: Shield,
+            label: 'Admins post only',
+            tone: 'warning',
+        });
+    }
+    if (chatInfo.isGroup && groupSettings?.joinApprovalEnabled) {
+        groupPolicyBadges.push({
+            key: 'join-approval',
+            icon: Users,
+            label: 'Join approval on',
+            tone: 'neutral',
+        });
+    }
 
     const searchFilterOptions = [
         { value: 'all', label: 'All', icon: Search },
@@ -348,7 +399,7 @@ export default function MessageArea({ onBack, onProfileClick }) {
                                     {isArchived ? <ArchiveRestore className="w-4 h-4" /> : <Archive className="w-4 h-4" />}
                                     {isArchived ? 'Move to Inbox' : 'Archive Chat'}
                                 </button>
-                                {chatInfo.isGroup && (
+                                {chatInfo.isGroup && isCurrentUserGroupAdmin && (
                                     <button
                                         onClick={() => {
                                             const username = window.prompt('Enter username to add:');
@@ -394,6 +445,28 @@ export default function MessageArea({ onBack, onProfileClick }) {
                     </div>
                 </div>
             </div>
+
+            {groupPolicyBadges.length > 0 && (
+                <div className="px-3.5 sm:px-5 pt-3 animate-slide-up">
+                    <div className="flex gap-2 overflow-x-auto no-scrollbar">
+                        {groupPolicyBadges.map(({ key, icon: Icon, label, tone }) => (
+                            <span
+                                key={key}
+                                className={`badge-pill whitespace-nowrap ${
+                                    tone === 'primary'
+                                        ? '!bg-primary-500/12 !text-primary-200'
+                                        : tone === 'warning'
+                                            ? '!bg-amber-500/10 !text-amber-200'
+                                            : ''
+                                }`}
+                            >
+                                <Icon className="w-3.5 h-3.5" />
+                                {label}
+                            </span>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {pinnedMessages.length > 0 && (
                 <button
@@ -637,6 +710,9 @@ export default function MessageArea({ onBack, onProfileClick }) {
                 chatId={activeChat._id}
                 recipientId={isSavedMessagesChat ? null : otherUser?._id}
                 isGroup={chatInfo.isGroup}
+                isGroupAdmin={isCurrentUserGroupAdmin}
+                groupSettings={groupSettings}
+                disappearingMessages={disappearingMessages}
                 disabled={isPendingRequest && !isRequester}
             />
         </div>

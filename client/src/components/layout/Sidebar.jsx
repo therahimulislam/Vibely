@@ -2,7 +2,7 @@
 // Left sidebar with header, search, chat list, and new chat
 
 import { useState, useEffect } from 'react';
-import { Search, Plus, Settings, LogOut, Sun, Moon, MessageCircle, X, Users, Check, UserRoundPlus, UserRoundMinus, Sparkles, Bookmark, Trash2, BellRing } from 'lucide-react';
+import { Search, Plus, Settings, LogOut, MessageCircle, X, Users, Check, UserRoundPlus, UserRoundMinus, Sparkles, Bookmark, Trash2, BellRing, Link2 } from 'lucide-react';
 import useAuthStore from '../../store/useAuthStore';
 import useChatStore from '../../store/useChatStore';
 import useStatusStore from '../../store/useStatusStore';
@@ -11,6 +11,7 @@ import ChatList from '../chat/ChatList';
 import StatusStrip from '../status/StatusStrip';
 import StatusComposerModal from '../status/StatusComposerModal';
 import StatusViewer from '../status/StatusViewer';
+import ThemeToggle from './ThemeToggle';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 import AvatarFallback from '../ui/AvatarFallback';
@@ -28,12 +29,15 @@ export default function Sidebar({ onProfileClick }) {
         fetchBookmarkCollections,
         bookmarkCollections,
         isLoadingBookmarkCollections,
+        getInviteInfo,
+        joinGroupViaInvite,
         error,
     } = useChatStore();
     const { myStatuses, statuses, fetchStatuses, isLoading: isLoadingStatuses } = useStatusStore();
     const { reminders, isLoadingReminders, fetchReminders, deleteReminder } = useReminderStore();
     const [showNewChat, setShowNewChat] = useState(false);
     const [showNewGroup, setShowNewGroup] = useState(false);
+    const [showJoinGroup, setShowJoinGroup] = useState(false);
     const [showFolderManager, setShowFolderManager] = useState(false);
     const [showCollections, setShowCollections] = useState(false);
     const [showReminders, setShowReminders] = useState(false);
@@ -44,6 +48,9 @@ export default function Sidebar({ onProfileClick }) {
     const [selectedUsers, setSelectedUsers] = useState([]);
     const [searchUsers, setSearchUsers] = useState([]);
     const [userSearchQuery, setUserSearchQuery] = useState('');
+    const [inviteCodeInput, setInviteCodeInput] = useState('');
+    const [invitePreview, setInvitePreview] = useState(null);
+    const [isLoadingInvitePreview, setIsLoadingInvitePreview] = useState(false);
     const [isSearching, setIsSearching] = useState(false);
     const [chatFilter, setChatFilter] = useState('all');
     const [activeFolderId, setActiveFolderId] = useState('');
@@ -51,10 +58,21 @@ export default function Sidebar({ onProfileClick }) {
     const [newFolderColor, setNewFolderColor] = useState('#6f6bff');
     const [folderDraftName, setFolderDraftName] = useState('');
     const [folderDraftColor, setFolderDraftColor] = useState('#6f6bff');
-    const isDark = document.documentElement.classList.contains('dark');
     const chatFolders = user?.preferences?.chatFolders || [];
     const folderColorOptions = ['#6f6bff', '#12b981', '#f97316', '#06b6d4', '#ec4899', '#eab308'];
     const activeFolder = chatFolders.find((folder) => folder.folderId === activeFolderId) || null;
+    const extractInviteCode = (value = '') =>
+        `${value}`.trim().replace(/\/+$/, '').split('/').filter(Boolean).pop() || '';
+    const closeCreationPanels = () => {
+        setShowNewChat(false);
+        setShowNewGroup(false);
+        setShowJoinGroup(false);
+        setGroupName('');
+        setSelectedUsers([]);
+        setUserSearchQuery('');
+        setInviteCodeInput('');
+        setInvitePreview(null);
+    };
 
     const formatFolderChatLabel = (chat) => {
         if (chat.isSavedMessages) return 'Saved Messages';
@@ -133,11 +151,39 @@ export default function Sidebar({ onProfileClick }) {
         return () => clearTimeout(timer);
     }, [userSearchQuery]);
 
+    useEffect(() => {
+        if (!showJoinGroup) {
+            setInvitePreview(null);
+            setIsLoadingInvitePreview(false);
+            return undefined;
+        }
+
+        const inviteCode = extractInviteCode(inviteCodeInput);
+        if (!inviteCode) {
+            setInvitePreview(null);
+            setIsLoadingInvitePreview(false);
+            return undefined;
+        }
+
+        const timer = setTimeout(async () => {
+            setIsLoadingInvitePreview(true);
+            try {
+                const invite = await getInviteInfo(inviteCode, { silent: true });
+                setInvitePreview(invite);
+            } catch (error) {
+                setInvitePreview(null);
+            } finally {
+                setIsLoadingInvitePreview(false);
+            }
+        }, 280);
+
+        return () => clearTimeout(timer);
+    }, [showJoinGroup, inviteCodeInput, getInviteInfo]);
+
     const handleStartChat = async (userId) => {
         try {
             await createChat(userId);
-            setShowNewChat(false);
-            setUserSearchQuery('');
+            closeCreationPanels();
             toast.success('Chat started!');
         } catch {
             toast.error('Failed to start chat');
@@ -159,14 +205,26 @@ export default function Sidebar({ onProfileClick }) {
                 name: groupName,
                 participants: selectedUsers.map(u => u._id)
             });
-            setShowNewGroup(false);
-            setGroupName('');
-            setSelectedUsers([]);
+            closeCreationPanels();
             fetchChats(); // Refresh list
             toast.success('Group created!');
         } catch (error) {
             console.error(error);
             toast.error('Failed to create group');
+        }
+    };
+    const handleJoinGroup = async () => {
+        const inviteCode = extractInviteCode(inviteCodeInput);
+        if (!inviteCode) {
+            toast.error('Paste a valid invite code or link');
+            return;
+        }
+
+        try {
+            await joinGroupViaInvite(inviteCode);
+            closeCreationPanels();
+        } catch (error) {
+            console.error('Join group error:', error);
         }
     };
 
@@ -365,15 +423,18 @@ export default function Sidebar({ onProfileClick }) {
                     >
                         <Settings className="w-4 h-4 opacity-65" />
                     </button>
+                    <ThemeToggle />
                     <button
-                        onClick={() => window.__toggleTheme?.()}
-                        className="icon-button !w-10 !h-10 sm:!w-[42px] sm:!h-[42px]"
-                        title="Toggle theme"
-                    >
-                        {isDark ? <Sun className="w-4 h-4 opacity-65" /> : <Moon className="w-4 h-4 opacity-65" />}
-                    </button>
-                    <button
-                        onClick={() => setShowNewChat(!showNewChat)}
+                        onClick={() => {
+                            const shouldOpen = !(showNewChat || showNewGroup || showJoinGroup);
+                            if (!shouldOpen) {
+                                closeCreationPanels();
+                                return;
+                            }
+                            setShowNewChat(true);
+                            setShowNewGroup(false);
+                            setShowJoinGroup(false);
+                        }}
                         className="icon-button relative group !w-10 !h-10 sm:!w-[42px] sm:!h-[42px]"
                         title="New Chat / Group"
                     >
@@ -663,29 +724,101 @@ export default function Sidebar({ onProfileClick }) {
             />
 
             {/* New Chat / Group Panel */}
-            {(showNewChat || showNewGroup) && (
+            {(showNewChat || showNewGroup || showJoinGroup) && (
                 <div className="px-3.5 sm:px-5 pb-4 flex-shrink-0 animate-slide-up">
                     <div className="glass-card p-4">
                         <div className="flex items-center justify-between mb-2">
                             <h3 className="text-sm font-semibold flex items-center gap-2">
-                                {showNewGroup ? <Users className="w-4 h-4 text-primary-400" /> : <MessageCircle className="w-4 h-4 text-primary-400" />}
-                                {showNewGroup ? 'New Group' : 'New Chat'}
+                                {showNewGroup ? <Users className="w-4 h-4 text-primary-400" /> : showJoinGroup ? <Link2 className="w-4 h-4 text-primary-400" /> : <MessageCircle className="w-4 h-4 text-primary-400" />}
+                                {showNewGroup ? 'New Group' : showJoinGroup ? 'Join Group' : 'New Chat'}
                             </h3>
                             <div className="flex gap-2">
-                                {!showNewGroup && (
+                                {!showNewGroup && !showJoinGroup && (
                                     <button
-                                        onClick={() => { setShowNewGroup(true); setShowNewChat(false); }}
+                                        onClick={() => { setShowNewGroup(true); setShowNewChat(false); setShowJoinGroup(false); }}
                                         className="text-xs text-primary-400 hover:text-primary-300 transition-colors"
                                     >
                                         Create Group
                                     </button>
                                 )}
-                                <button onClick={() => { setShowNewChat(false); setShowNewGroup(false); }}>
+                                {!showJoinGroup && (
+                                    <button
+                                        onClick={() => { setShowJoinGroup(true); setShowNewChat(false); setShowNewGroup(false); }}
+                                        className="text-xs text-primary-400 hover:text-primary-300 transition-colors"
+                                    >
+                                        Join Group
+                                    </button>
+                                )}
+                                {!showNewChat && !showNewGroup && (
+                                    <button
+                                        onClick={() => { setShowNewChat(true); setShowNewGroup(false); setShowJoinGroup(false); }}
+                                        className="text-xs text-primary-400 hover:text-primary-300 transition-colors"
+                                    >
+                                        New Chat
+                                    </button>
+                                )}
+                                <button onClick={closeCreationPanels}>
                                     <X className="w-4 h-4 opacity-40 hover:opacity-80" />
                                 </button>
                             </div>
                         </div>
 
+                        {showJoinGroup ? (
+                            <div className="space-y-3">
+                                <p className="text-xs opacity-50">
+                                    Paste a Vibely invite link or just the invite code to preview the group before joining.
+                                </p>
+                                <input
+                                    type="text"
+                                    value={inviteCodeInput}
+                                    onChange={(e) => setInviteCodeInput(e.target.value)}
+                                    placeholder="Paste invite link or code..."
+                                    className="input-glass py-2 text-sm w-full"
+                                    autoFocus
+                                />
+                                {isLoadingInvitePreview && (
+                                    <p className="text-[11px] opacity-40">Checking invite…</p>
+                                )}
+                                {invitePreview && (
+                                    <div className="rounded-2xl border border-white/8 bg-white/5 p-4">
+                                        <div className="flex items-center gap-3 mb-3">
+                                            <div className="w-12 h-12 rounded-full overflow-hidden ring-1 ring-white/10 flex-shrink-0">
+                                                {invitePreview.groupAvatar ? (
+                                                    <img src={invitePreview.groupAvatar} alt={invitePreview.groupName} className="w-full h-full object-cover" />
+                                                ) : (
+                                                    <AvatarFallback name={invitePreview.groupName} className="text-sm" variant="group" icon={<Users className="w-5 h-5" />} />
+                                                )}
+                                            </div>
+                                            <div className="min-w-0">
+                                                <p className="text-sm font-semibold truncate">{invitePreview.groupName}</p>
+                                                <p className="text-xs opacity-45 truncate">
+                                                    {invitePreview.memberCount} members
+                                                    {invitePreview.groupAdmin?.name ? ` • Admin: ${invitePreview.groupAdmin.name}` : ''}
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <div className="flex gap-2 flex-wrap">
+                                            {invitePreview.joinApprovalEnabled && (
+                                                <span className="badge-pill">Approval required</span>
+                                            )}
+                                            {invitePreview.alreadyJoined && (
+                                                <span className="badge-pill !bg-primary-500/15 !text-primary-200">Already joined</span>
+                                            )}
+                                            {invitePreview.pendingRequest && (
+                                                <span className="badge-pill !bg-amber-500/10 !text-amber-200">Request pending</span>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+                                <button
+                                    onClick={handleJoinGroup}
+                                    className="w-full btn-primary px-4 py-2.5 text-sm"
+                                >
+                                    {invitePreview?.alreadyJoined ? 'Open Group' : invitePreview?.pendingRequest ? 'Check Request' : 'Join Group'}
+                                </button>
+                            </div>
+                        ) : (
+                            <>
                         {showNewGroup && (
                             <div className="mb-3">
                                 <label className="text-xs opacity-50 block mb-1">Group Name</label>
@@ -772,6 +905,8 @@ export default function Sidebar({ onProfileClick }) {
                             >
                                 Create Group ({selectedUsers.length})
                             </button>
+                        )}
+                            </>
                         )}
                     </div>
                 </div>

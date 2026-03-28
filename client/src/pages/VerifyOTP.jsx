@@ -6,6 +6,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { ShieldCheck, ArrowLeft } from 'lucide-react';
 import toast from 'react-hot-toast';
 import useAuthStore from '../store/useAuthStore';
+import ThemeToggle from '../components/layout/ThemeToggle';
 
 export default function VerifyOTP() {
     const [otp, setOtp] = useState(['', '', '', '', '', '']);
@@ -97,6 +98,9 @@ export default function VerifyOTP() {
         <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
             <div className="bg-orb bg-orb-1" />
             <div className="bg-orb bg-orb-2" />
+            <div className="absolute top-4 right-4 z-20">
+                <ThemeToggle />
+            </div>
 
             <div className="glass-card w-full max-w-md p-8 animate-slide-up relative z-10">
                 <button

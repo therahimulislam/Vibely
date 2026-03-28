@@ -16,6 +16,26 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Poppins:wght@500;600;700&display=swap"
     rel="stylesheet" />
+  <script>
+    (() => {
+      const savedTheme = localStorage.getItem('theme');
+      const theme = savedTheme === 'light' || savedTheme === 'dark'
+        ? savedTheme
+        : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      const root = document.documentElement;
+      root.classList.toggle('dark', theme === 'dark');
+      root.dataset.theme = theme;
+      root.style.colorScheme = theme;
+      const themeColor = document.querySelector('meta[name="theme-color"]');
+      if (themeColor) {
+        themeColor.setAttribute('content', theme === 'dark' ? '#0f1320' : '#eef2ff');
+      }
+      const appleBar = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+      if (appleBar) {
+        appleBar.setAttribute('content', theme === 'dark' ? 'black-translucent' : 'default');
+      }
+    })();
+  </script>
   <title>Vibely | Messaging Web</title>
 </head>
 

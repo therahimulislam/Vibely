@@ -52,6 +52,8 @@ const sortBookmarkCollections = (collections = []) =>
     [...collections].sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
 
 const getCurrentUserId = () => useAuthStore.getState().user?._id || null;
+const extractInviteCode = (value = '') =>
+    `${value}`.trim().replace(/\/+$/, '').split('/').filter(Boolean).pop() || '';
 
 const toggleUserInIdList = (list = [], userId, enabled) => {
     if (!userId) return list || [];
@@ -105,6 +107,10 @@ const upsertChat = (chats = [], nextChat) => {
             : [nextChat, ...chats]
     );
 };
+const replaceChatEverywhere = (state, nextChat) => ({
+    chats: upsertChat(state.chats, nextChat),
+    activeChat: sameId(state.activeChat?._id, nextChat?._id) ? nextChat : state.activeChat,
+});
 
 const sortMessagesByCreatedAt = (messages = []) =>
     [...messages].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
@@ -605,14 +611,99 @@ const useChatStore = create((set, get) => ({
     addToGroup: async (chatId, userId, username) => {
         try {
             const { data } = await api.put('/chats/group/add', { chatId, userId, username });
-            set((state) => ({
-                chats: state.chats.map((c) => (c._id === chatId ? data.chat : c)),
-                activeChat: state.activeChat?._id === chatId ? data.chat : state.activeChat,
-            }));
+            set((state) => replaceChatEverywhere(state, data.chat));
             toast.success('User added to group');
         } catch (error) {
             console.error('Failed to add to group:', error);
             toast.error(error.response?.data?.error || 'Failed to add user');
+        }
+    },
+
+    updateGroupSettings: async (chatId, payload) => {
+        try {
+            const { data } = await api.patch(`/chats/${chatId}/group-settings`, payload);
+            set((state) => replaceChatEverywhere(state, data.chat));
+            toast.success('Group settings updated');
+            return data.chat;
+        } catch (error) {
+            toast.error(error.response?.data?.error || 'Failed to update group settings');
+            throw error;
+        }
+    },
+
+    createInviteLink: async (chatId) => {
+        try {
+            const { data } = await api.post(`/chats/${chatId}/invite-links`);
+            set((state) => replaceChatEverywhere(state, data.chat));
+            toast.success('Invite link created');
+            return data.inviteLink;
+        } catch (error) {
+            toast.error(error.response?.data?.error || 'Failed to create invite link');
+            throw error;
+        }
+    },
+
+    revokeInviteLink: async (chatId, code) => {
+        try {
+            const { data } = await api.delete(`/chats/${chatId}/invite-links/${code}`);
+            set((state) => replaceChatEverywhere(state, data.chat));
+            toast.success('Invite link revoked');
+            return data.chat;
+        } catch (error) {
+            toast.error(error.response?.data?.error || 'Failed to revoke invite link');
+            throw error;
+        }
+    },
+
+    getInviteInfo: async (codeOrUrl, { silent = false } = {}) => {
+        try {
+            const inviteCode = extractInviteCode(codeOrUrl);
+            const { data } = await api.get(`/chats/invite/${inviteCode}`);
+            return data.invite;
+        } catch (error) {
+            if (!silent) {
+                toast.error(error.response?.data?.error || 'Failed to load invite');
+            }
+            throw error;
+        }
+    },
+
+    joinGroupViaInvite: async (codeOrUrl) => {
+        try {
+            const inviteCode = extractInviteCode(codeOrUrl);
+            const { data } = await api.post(`/chats/invite/${inviteCode}/join`);
+            const currentUserId = getCurrentUserId();
+            const userIsParticipant = (data.chat?.participants || []).some((participant) =>
+                sameId(participant?._id || participant, currentUserId)
+            );
+
+            if (data.chat && (data.joined || userIsParticipant)) {
+                set((state) => replaceChatEverywhere(state, data.chat));
+            }
+
+            if (data.joined && data.chat) {
+                await get().setActiveChat(data.chat);
+                toast.success('Joined group');
+            } else if (data.pending) {
+                toast.success('Join request sent');
+            }
+
+            return data;
+        } catch (error) {
+            toast.error(error.response?.data?.error || 'Failed to join group');
+            throw error;
+        }
+    },
+
+    reviewJoinRequest: async (chatId, userId, action) => {
+        try {
+            const { data } = await api.patch(`/chats/${chatId}/join-requests`, { userId, action });
+            set((state) => replaceChatEverywhere(state, data.chat));
+            toast.success(action === 'accept' ? 'Member approved' : 'Request rejected');
+            return data.chat;
+        } catch (error) {
+            toast.error(error.response?.data?.error || 'Failed to review join request');
+            throw error;
         }
     },
 

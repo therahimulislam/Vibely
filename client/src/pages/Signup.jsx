@@ -7,6 +7,8 @@ import { GoogleLogin } from '@react-oauth/google';
 import { User, Mail, Lock, Eye, EyeOff, MessageCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import useAuthStore from '../store/useAuthStore';
+import useThemeStore from '../store/useThemeStore';
+import ThemeToggle from '../components/layout/ThemeToggle';
 
 export default function Signup() {
     const [name, setName] = useState('');
@@ -16,6 +18,7 @@ export default function Signup() {
     const [isLoading, setIsLoading] = useState(false);
     const navigate = useNavigate();
     const { signup, googleLogin, clearError } = useAuthStore();
+    const theme = useThemeStore((state) => state.theme);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -47,6 +50,9 @@ export default function Signup() {
             <div className="bg-orb bg-orb-1" />
             <div className="bg-orb bg-orb-2" />
             <div className="bg-orb bg-orb-3" />
+            <div className="absolute top-4 right-4 z-20">
+                <ThemeToggle />
+            </div>
 
             <div className="glass-card w-full max-w-md p-8 animate-slide-up relative z-10">
                 {/* Logo */}
@@ -144,7 +150,7 @@ export default function Signup() {
                     <GoogleLogin
                         onSuccess={handleGoogleSuccess}
                         onError={() => toast.error('Google signup failed')}
-                        theme="filled_black"
+                        theme={theme === 'dark' ? 'filled_black' : 'outline'}
                         shape="pill"
                         size="large"
                         text="signup_with"

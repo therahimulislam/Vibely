@@ -3,6 +3,50 @@
 
 const mongoose = require('mongoose');
 
+const inviteLinkSchema = new mongoose.Schema(
+    {
+        code: {
+            type: String,
+            required: true,
+            trim: true,
+        },
+        createdBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            required: true,
+        },
+        createdAt: {
+            type: Date,
+            default: Date.now,
+        },
+        revokedAt: {
+            type: Date,
+            default: null,
+        },
+    },
+    { _id: false }
+);
+
+const joinRequestSchema = new mongoose.Schema(
+    {
+        userId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            required: true,
+        },
+        requestedAt: {
+            type: Date,
+            default: Date.now,
+        },
+        viaCode: {
+            type: String,
+            trim: true,
+            default: '',
+        },
+    },
+    { _id: false }
+);
+
 const chatSchema = new mongoose.Schema(
     {
         participants: [
@@ -69,6 +113,46 @@ const chatSchema = new mongoose.Schema(
             type: mongoose.Schema.Types.ObjectId,
             ref: 'User',
             default: null,
+        },
+        groupSettings: {
+            adminOnlyMessages: {
+                type: Boolean,
+                default: false,
+            },
+            allowMemberMedia: {
+                type: Boolean,
+                default: true,
+            },
+            allowMemberPolls: {
+                type: Boolean,
+                default: true,
+            },
+            joinApprovalEnabled: {
+                type: Boolean,
+                default: false,
+            },
+            slowModeSeconds: {
+                type: Number,
+                default: 0,
+            },
+        },
+        disappearingMessages: {
+            enabled: {
+                type: Boolean,
+                default: false,
+            },
+            durationHours: {
+                type: Number,
+                default: 0,
+            },
+        },
+        inviteLinks: {
+            type: [inviteLinkSchema],
+            default: [],
+        },
+        pendingJoinRequests: {
+            type: [joinRequestSchema],
+            default: [],
         },
     },
     {

@@ -3,6 +3,7 @@ import useAuthStore from '../store/useAuthStore';
 import { Smartphone, Monitor, X, Shield, Clock, MapPin } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
+import ThemeToggle from '../components/layout/ThemeToggle';
 
 const ManageSessions = () => {
     const { getSessions, revokeSession, revokeAllOtherSessions } = useAuthStore();
@@ -53,9 +54,9 @@ const ManageSessions = () => {
         const osName = os?.toLowerCase() || '';
 
         if (type.includes('mobile') || type.includes('phone') || osName.includes('android') || osName.includes('ios')) {
-            return <Smartphone className="w-6 h-6 text-white" />;
+            return <Smartphone className="w-6 h-6 text-primary-400" />;
         }
-        return <Monitor className="w-6 h-6 text-white" />;
+        return <Monitor className="w-6 h-6 text-primary-400" />;
     };
 
     if (isLoading) {
@@ -67,15 +68,18 @@ const ManageSessions = () => {
     }
 
     return (
-        <div className="max-w-3xl mx-auto p-6 space-y-8">
+        <div className="max-w-3xl mx-auto p-4 sm:p-6 space-y-6 sm:space-y-8">
+            <div className="flex justify-end">
+                <ThemeToggle />
+            </div>
             <div>
-                <h1 className="text-xl font-bold text-white mb-6 tracking-wide">ACTIVE DEVICES</h1>
+                <h1 className="text-xl font-bold mb-6 tracking-wide">ACTIVE DEVICES</h1>
 
                 <div className="space-y-4">
                     {sessions.map((session) => (
                         <div
                             key={session._id}
-                            className="bg-[#1e1e24] rounded-2xl p-4 flex items-center justify-between group border border-white/5 hover:border-white/10 transition-all"
+                            className="glass-card rounded-2xl p-4 flex items-center justify-between group transition-all"
                         >
                             <div className="flex items-center gap-4">
                                 <div className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center flex-shrink-0">
@@ -83,7 +87,7 @@ const ManageSessions = () => {
                                 </div>
 
                                 <div>
-                                    <h3 className="font-medium text-white text-base flex items-center gap-3">
+                                    <h3 className="font-medium text-base flex items-center gap-3 flex-wrap">
                                         {session.os || 'Unknown OS'}
                                         {session.isCurrent && (
                                             <div className="flex items-center gap-1.5 bg-[#2ecc71]/20 px-2 py-0.5 rounded text-[10px] font-bold text-[#2ecc71] uppercase tracking-wider">
@@ -92,13 +96,13 @@ const ManageSessions = () => {
                                             </div>
                                         )}
                                     </h3>
-                                    <div className="text-sm text-gray-400 mt-0.5 flex flex-col gap-0.5">
+                                    <div className="text-sm opacity-60 mt-0.5 flex flex-col gap-0.5">
                                         <div className="flex items-center gap-1.5">
                                             <span>{session.browser}</span>
-                                            <span className="text-gray-600">•</span>
+                                            <span className="opacity-30">•</span>
                                             <span>{session.location && session.location !== 'Unknown' ? session.location : 'Unknown Location'}</span>
                                         </div>
-                                        <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                                        <div className="flex items-center gap-1.5 text-xs opacity-50">
                                             {session.isCurrent ? (
                                                 <span className="text-[#2ecc71]">Active now</span>
                                             ) : (
@@ -112,7 +116,7 @@ const ManageSessions = () => {
                             {!session.isCurrent && (
                                 <button
                                     onClick={() => handleRevoke(session._id)}
-                                    className="p-2 text-gray-500 hover:text-white hover:bg-white/10 rounded-full transition-colors"
+                                    className="p-2 opacity-50 hover:opacity-100 hover:bg-white/10 rounded-full transition-colors"
                                     title="Revoke session"
                                 >
                                     <X className="w-5 h-5" />

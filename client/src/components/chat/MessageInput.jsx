@@ -5,10 +5,19 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { Send, Smile, Image, X, Paperclip, FileText, BarChart3, Plus, Minus, Mic, Sparkles, Reply, CalendarDays, Clock3, Trash2, Edit3, EyeOff } from 'lucide-react';
 import useSocket from '../../hooks/useSocket';
 import useChatStore from '../../store/useChatStore';
+import useAuthStore from '../../store/useAuthStore';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 
-export default function MessageInput({ chatId, recipientId, disabled = false, isGroup = false }) {
+export default function MessageInput({
+    chatId,
+    recipientId,
+    disabled = false,
+    isGroup = false,
+    isGroupAdmin = false,
+    groupSettings = {},
+    disappearingMessages = {},
+}) {
     const formatDateTimeLocal = (date) => {
         const pad = (value) => `${value}`.padStart(2, '0');
         return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
@@ -44,7 +53,9 @@ export default function MessageInput({ chatId, recipientId, disabled = false, is
     const recordingStreamRef = useRef(null);
     const recordingChunksRef = useRef([]);
     const recordingTimerRef = useRef(null);
+    const hydratedChatIdRef = useRef(null);
     const { sendMessage, emitTyping, emitStopTyping } = useSocket();
+    const { user, saveChatDraft } = useAuthStore();
     const {
         createPoll,
         createScheduledMessage,
@@ -56,6 +67,26 @@ export default function MessageInput({ chatId, recipientId, disabled = false, is
         replyingTo,
         clearReplyingTo,
     } = useChatStore();
+    const savedDraftText = (user?.preferences?.chatDrafts || []).find((entry) => `${entry.chatId}` === `${chatId}`)?.text || '';
+    const adminOnlyMessages = isGroup && groupSettings?.adminOnlyMessages && !isGroupAdmin;
+    const mediaBlocked = isGroup && groupSettings?.allowMemberMedia === false && !isGroupAdmin;
+    const pollBlocked = isGroup && groupSettings?.allowMemberPolls === false && !isGroupAdmin;
+    const composerDisabled = disabled || adminOnlyMessages;
+    const formatDisappearingLabel = (hours) => {
+        if (!hours) return 'Off';
+        if (hours === 24) return '24h';
+        if (hours === 168) return '7d';
+        if (hours === 2160) return '90d';
+        return `${hours}h`;
+    };
+    const persistDraft = useCallback(async (nextText) => {
+        if (!chatId) return;
+        try {
+            await saveChatDraft(chatId, nextText);
+        } catch (error) {
+            console.error('Draft sync error:', error);
+        }
+    }, [chatId, saveChatDraft]);
 
     const getReplyPreview = (message) => {
         if (!message) return '';
@@ -83,19 +114,33 @@ export default function MessageInput({ chatId, recipientId, disabled = false, is
     }, [chatId]);
 
     useEffect(() => {
+        if (hydratedChatIdRef.current === chatId) return;
+        hydratedChatIdRef.current = chatId;
+        setText(savedDraftText);
         clearReplyingTo();
         setShowScheduleComposer(false);
         setScheduledFor(getDefaultScheduleTime());
         setEditingScheduledMessage(null);
         setScheduledEditText('');
         setViewOnceEnabled(false);
-    }, [chatId, clearReplyingTo]);
+    }, [chatId, savedDraftText, clearReplyingTo]);
 
     useEffect(() => {
         if (!media || !['image', 'video'].includes(mediaType)) {
             setViewOnceEnabled(false);
         }
     }, [media, mediaType]);
+
+    useEffect(() => {
+        if (!chatId) return undefined;
+        if (savedDraftText === text) return undefined;
+
+        const timer = window.setTimeout(() => {
+            persistDraft(text);
+        }, 450);
+
+        return () => window.clearTimeout(timer);
+    }, [chatId, text, savedDraftText, persistDraft]);
 
     useEffect(() => () => {
         if (recordingTimerRef.current) {
@@ -109,6 +154,7 @@ export default function MessageInput({ chatId, recipientId, disabled = false, is
 
     // Handle typing indicator
     const handleTyping = useCallback(() => {
+        if (composerDisabled) return;
         emitTyping(chatId, recipientId);
 
         if (typingTimeoutRef.current) {
@@ -118,9 +164,14 @@ export default function MessageInput({ chatId, recipientId, disabled = false, is
         typingTimeoutRef.current = setTimeout(() => {
             emitStopTyping(chatId, recipientId);
         }, 2000);
-    }, [chatId, recipientId]);
+    }, [chatId, recipientId, composerDisabled]);
 
     const handleMediaSelect = (e) => {
+        if (mediaBlocked) {
+            toast.error('Only admins can share media right now');
+            return;
+        }
+
         const file = e.target.files?.[0];
         if (!file) return;
 
@@ -182,7 +233,7 @@ export default function MessageInput({ chatId, recipientId, disabled = false, is
     };
 
     const startVoiceRecording = async () => {
-        if (disabled || isRecording || isSending) return;
+        if (composerDisabled || mediaBlocked || isRecording || isSending) return;
         if (media) {
             toast.error('Send or remove the current attachment first');
             return;
@@ -243,7 +294,7 @@ export default function MessageInput({ chatId, recipientId, disabled = false, is
     };
 
     const handleSend = async () => {
-        if ((!text.trim() && !media) || isSending || disabled) return;
+        if ((!text.trim() && !media) || isSending || composerDisabled) return;
 
         setIsSending(true);
         emitStopTyping(chatId, recipientId);
@@ -290,6 +341,7 @@ export default function MessageInput({ chatId, recipientId, disabled = false, is
             setUploadProgress(0);
             clearReplyingTo();
             inputRef.current?.focus();
+            persistDraft('');
         } catch (error) {
             toast.error('Failed to send message');
             console.error('Send error:', error);
@@ -299,7 +351,7 @@ export default function MessageInput({ chatId, recipientId, disabled = false, is
     };
 
     const handleScheduleMessage = async () => {
-        if ((!text.trim() && !media) || isSending || disabled) return;
+        if ((!text.trim() && !media) || isSending || composerDisabled) return;
 
         setIsSending(true);
         emitStopTyping(chatId, recipientId);
@@ -332,6 +384,7 @@ export default function MessageInput({ chatId, recipientId, disabled = false, is
             setScheduledFor(getDefaultScheduleTime());
             clearReplyingTo();
             inputRef.current?.focus();
+            persistDraft('');
         } catch (error) {
             console.error('Schedule error:', error);
         } finally {
@@ -372,6 +425,11 @@ export default function MessageInput({ chatId, recipientId, disabled = false, is
     };
 
     const handleCreatePoll = async () => {
+        if (pollBlocked) {
+            toast.error('Only admins can create polls right now');
+            return;
+        }
+
         const normalizedOptions = pollOptions.map((option) => option.trim()).filter(Boolean);
         if (!pollQuestion.trim()) {
             toast.error('Add a poll question');
@@ -395,6 +453,7 @@ export default function MessageInput({ chatId, recipientId, disabled = false, is
     };
 
     const handleKeyDown = (e) => {
+        if (composerDisabled) return;
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             handleSend();
@@ -425,6 +484,7 @@ export default function MessageInput({ chatId, recipientId, disabled = false, is
                             <button
                                 onClick={() => setShowScheduleComposer(true)}
                                 className="badge-pill hover:opacity-100 opacity-80 transition-opacity"
+                                disabled={composerDisabled}
                             >
                                 <CalendarDays className="w-3.5 h-3.5" />
                                 Schedule
@@ -554,7 +614,7 @@ export default function MessageInput({ chatId, recipientId, disabled = false, is
                         </p>
                         <button
                             onClick={editingScheduledMessage ? handleUpdateScheduledMessage : handleScheduleMessage}
-                            disabled={disabled || isSending || isRecording || (editingScheduledMessage ? (!scheduledEditText.trim() && !editingScheduledMessage.fileUrl) : (!text.trim() && !media))}
+                            disabled={composerDisabled || isSending || isRecording || (editingScheduledMessage ? (!scheduledEditText.trim() && !editingScheduledMessage.fileUrl) : (!text.trim() && !media))}
                             className="btn-primary px-4 py-2 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                             {editingScheduledMessage ? 'Save changes' : 'Schedule it'}
@@ -739,7 +799,23 @@ export default function MessageInput({ chatId, recipientId, disabled = false, is
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
                     <div className="flex items-center gap-2 flex-wrap">
                         <span className="badge-pill">Messages</span>
-                        {isGroup && <span className="badge-pill">Polls enabled</span>}
+                        {isGroup && (
+                            <span className={`badge-pill ${pollBlocked ? '!bg-amber-500/10 !text-amber-200' : ''}`}>
+                                {pollBlocked ? 'Polls admin only' : 'Polls enabled'}
+                            </span>
+                        )}
+                        {isGroup && mediaBlocked && (
+                            <span className="badge-pill !bg-amber-500/10 !text-amber-200">Media admin only</span>
+                        )}
+                        {disappearingMessages?.enabled && (
+                            <span className="badge-pill !bg-primary-500/12 !text-primary-200">
+                                <Clock3 className="w-3.5 h-3.5" />
+                                {formatDisappearingLabel(disappearingMessages.durationHours)}
+                            </span>
+                        )}
+                        {adminOnlyMessages && (
+                            <span className="badge-pill !bg-rose-500/10 !text-rose-200">Admins posting only</span>
+                        )}
                     </div>
                     <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
                         <button
@@ -752,7 +828,7 @@ export default function MessageInput({ chatId, recipientId, disabled = false, is
                         <button
                             onClick={() => (isRecording ? stopVoiceRecording() : startVoiceRecording())}
                             className={`badge-pill hover:opacity-100 transition-opacity whitespace-nowrap ${isRecording ? 'text-red-200 border-red-400/20 bg-red-500/10 opacity-100' : 'opacity-70'}`}
-                            disabled={disabled || isSending}
+                            disabled={composerDisabled || mediaBlocked || isSending}
                         >
                             <Mic className="w-3.5 h-3.5" />
                             {isRecording ? 'Stop' : 'Voice'}
@@ -766,7 +842,7 @@ export default function MessageInput({ chatId, recipientId, disabled = false, is
                                 }
                             }}
                             className={`badge-pill hover:opacity-100 transition-opacity whitespace-nowrap ${showScheduleComposer ? 'opacity-100 bg-primary-500/15 text-primary-200 border-primary-400/20' : 'opacity-70'}`}
-                            disabled={disabled || isRecording}
+                            disabled={composerDisabled || isRecording}
                         >
                             <CalendarDays className="w-3.5 h-3.5" />
                             Later
@@ -775,7 +851,7 @@ export default function MessageInput({ chatId, recipientId, disabled = false, is
                             <button
                                 onClick={() => setViewOnceEnabled((current) => !current)}
                                 className={`badge-pill hover:opacity-100 transition-opacity whitespace-nowrap ${viewOnceEnabled ? 'opacity-100 bg-primary-500/15 text-primary-200 border-primary-400/20' : 'opacity-70'}`}
-                                disabled={disabled || isRecording || isSending}
+                                disabled={composerDisabled || isRecording || isSending}
                             >
                                 <EyeOff className="w-3.5 h-3.5" />
                                 {viewOnceEnabled ? 'View once on' : 'View once'}
@@ -789,6 +865,7 @@ export default function MessageInput({ chatId, recipientId, disabled = false, is
                 <button
                     onClick={() => setShowEmoji(!showEmoji)}
                     className={`icon-button !w-10 !h-10 sm:!w-[42px] sm:!h-[42px] flex-shrink-0 ${showEmoji ? 'bg-primary-500/20 text-primary-400' : ''}`}
+                    disabled={composerDisabled}
                 >
                     <Smile className="w-4 h-4 opacity-70" />
                 </button>
@@ -799,6 +876,10 @@ export default function MessageInput({ chatId, recipientId, disabled = false, is
                         <div className="absolute bottom-full mb-2 left-0 right-auto glass-card p-2 min-w-[140px] max-w-[min(16rem,calc(100vw-2rem))] flex flex-col gap-1 z-20 animate-slide-up">
                             <button
                                 onClick={() => {
+                                    if (mediaBlocked) {
+                                        toast.error('Only admins can share media right now');
+                                        return;
+                                    }
                                     setIsDocument(false);
                                     if (fileInputRef.current) fileInputRef.current.accept = "image/*,video/*";
                                     fileInputRef.current?.click();
@@ -810,6 +891,10 @@ export default function MessageInput({ chatId, recipientId, disabled = false, is
                             </button>
                             <button
                                 onClick={() => {
+                                    if (mediaBlocked) {
+                                        toast.error('Only admins can share media right now');
+                                        return;
+                                    }
                                     setIsDocument(true);
                                     if (fileInputRef.current) fileInputRef.current.accept = "*";
                                     fileInputRef.current?.click();
@@ -822,6 +907,10 @@ export default function MessageInput({ chatId, recipientId, disabled = false, is
                             {isGroup && (
                                 <button
                                     onClick={() => {
+                                        if (pollBlocked) {
+                                            toast.error('Only admins can create polls right now');
+                                            return;
+                                        }
                                         setShowPollComposer(true);
                                         setShowAttach(false);
                                     }}
@@ -837,6 +926,7 @@ export default function MessageInput({ chatId, recipientId, disabled = false, is
                         onClick={() => setShowAttach(!showAttach)}
                         className={`icon-button !w-10 !h-10 sm:!w-[42px] sm:!h-[42px] flex-shrink-0 ${showAttach ? 'bg-primary-500/20 text-primary-400' : ''}`}
                         title="Attach file"
+                        disabled={composerDisabled}
                     >
                         <Paperclip className="w-4 h-4 opacity-70" />
                     </button>
@@ -856,18 +946,24 @@ export default function MessageInput({ chatId, recipientId, disabled = false, is
                         value={text}
                         onChange={(e) => { setText(e.target.value); handleTyping(); }}
                         onKeyDown={handleKeyDown}
-                        placeholder={disabled ? 'Accept this request to reply' : 'Write a message...'}
+                        placeholder={
+                            disabled
+                                ? 'Accept this request to reply'
+                                : adminOnlyMessages
+                                    ? 'Only admins can send messages right now'
+                                    : 'Write a message...'
+                        }
                         rows={1}
                         className="input-glass py-2.5 sm:py-3 text-sm resize-none max-h-32 min-h-[44px] sm:min-h-[48px]"
                         style={{ height: 'auto', overflow: text.split('\n').length > 3 ? 'auto' : 'hidden' }}
-                        disabled={disabled || isRecording}
+                        disabled={composerDisabled || isRecording}
                     />
                 </div>
 
                 {/* Send button (floating) */}
                 <button
                     onClick={handleSend}
-                    disabled={disabled || isSending || isRecording || (!text.trim() && !media)}
+                    disabled={composerDisabled || isSending || isRecording || (!text.trim() && !media)}
                     className="p-3 sm:p-3.5 rounded-[18px] sm:rounded-[20px] text-white transition-all duration-300 disabled:opacity-30 disabled:cursor-not-allowed flex-shrink-0 hover:scale-105 active:scale-95"
                     style={{
                         background: text.trim() || media ? 'var(--gradient-primary)' : 'rgba(124, 92, 252, 0.2)',

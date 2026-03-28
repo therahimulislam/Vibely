@@ -5,16 +5,26 @@ const Chat = require('../models/Chat');
 const User = require('../models/User');
 const Message = require('../models/Message');
 const { sanitizeMessageForViewer } = require('../utils/messageVisibility');
+const {
+    normalizeGroupSettings,
+    normalizeDisappearingMessages,
+    ensureGroupAdmin,
+    getActiveInviteLinks,
+} = require('../utils/chatRules');
+const { randomUUID } = require('crypto');
 
 const USER_PUBLIC_FIELDS = 'name username avatar isOnline lastSeen';
 const MESSAGE_SENDER_FIELDS = 'name username avatar';
 const LINK_PATTERN = /(https?:\/\/[^\s]+|www\.[^\s]+)/i;
+const sameId = (left, right) => String(left || '') === String(right || '');
 const areMutualContacts = (user, otherUserId) =>
     user.contacts?.some((id) => id.toString() === otherUserId.toString());
 const chatPopulateQuery = [
     { path: 'participants', select: USER_PUBLIC_FIELDS },
     { path: 'groupAdmin', select: 'name username avatar' },
     { path: 'requestedBy', select: 'name username avatar' },
+    { path: 'inviteLinks.createdBy', select: 'name username avatar' },
+    { path: 'pendingJoinRequests.userId', select: 'name username avatar' },
     { path: 'lastMessage' },
 ];
 
@@ -25,12 +35,45 @@ const populateChatQuery = (query) => chatPopulateQuery.reduce(
 const sanitizeChatForViewer = (chat, userId) => {
     const plain = typeof chat?.toObject === 'function' ? chat.toObject({ depopulate: false }) : chat;
     if (!plain) return plain;
+    const viewerIsAdmin = !!plain.isGroup && sameId(plain.groupAdmin?._id || plain.groupAdmin, userId);
+    const now = Date.now();
+    const lastMessage = plain.lastMessage?.expiresAt && new Date(plain.lastMessage.expiresAt).getTime() <= now
+        ? null
+        : plain.lastMessage
+            ? sanitizeMessageForViewer(plain.lastMessage, userId)
+            : null;
 
     return {
         ...plain,
-        lastMessage: plain.lastMessage ? sanitizeMessageForViewer(plain.lastMessage, userId) : null,
+        lastMessage,
+        inviteLinks: viewerIsAdmin ? getActiveInviteLinks(plain) : [],
+        pendingJoinRequests: viewerIsAdmin ? (plain.pendingJoinRequests || []) : [],
     };
 };
+
+const populateAndSanitizeChatById = async (chatId, userId) =>
+    sanitizeChatForViewer(await populateChatQuery(Chat.findById(chatId)), userId);
+
+const buildInviteUrl = (code) => {
+    const baseUrl = process.env.CLIENT_URL?.split(',')[0]?.trim() || '';
+    if (!baseUrl) return code;
+    return `${baseUrl.replace(/\/$/, '')}/join/${code}`;
+};
+
+const findChatByInviteCode = async (code) => findChatByInviteCode.baseQuery(code)
+    .populate('groupAdmin', 'name username avatar')
+    .populate('participants', USER_PUBLIC_FIELDS)
+    .populate('pendingJoinRequests.userId', 'name username avatar');
+
+findChatByInviteCode.baseQuery = (code) => Chat.findOne({
+    isGroup: true,
+    inviteLinks: {
+        $elemMatch: {
+            code,
+            revokedAt: null,
+        },
+    },
+});
 
 const ensureChatParticipant = async (chatId, userId) => {
     const chat = await Chat.findOne({
@@ -105,6 +148,10 @@ exports.getChatAssets = async (req, res) => {
             isDeleted: { $ne: true },
             deletedFor: { $ne: req.userId },
             'viewOnce.enabled': { $ne: true },
+            $or: [
+                { expiresAt: null },
+                { expiresAt: { $gt: new Date() } },
+            ],
         };
 
         const tabConditions = {
@@ -398,9 +445,216 @@ exports.addToGroup = async (req, res) => {
             return res.status(404).json({ error: 'Chat not found' });
         }
 
-        res.json({ chat });
+        res.json({ chat: sanitizeChatForViewer(chat, req.userId) });
     } catch (error) {
         res.status(500).json({ error: 'Server error' });
+    }
+};
+
+exports.updateGroupSettings = async (req, res) => {
+    try {
+        const chat = await Chat.findOne({
+            _id: req.params.id,
+            participants: req.userId,
+            isGroup: true,
+        });
+
+        if (!chat) {
+            return res.status(404).json({ error: 'Group not found' });
+        }
+
+        ensureGroupAdmin(chat, req.userId);
+
+        chat.groupSettings = normalizeGroupSettings({
+            ...(chat.groupSettings?.toObject?.() || {}),
+            ...(req.body.groupSettings || {}),
+        });
+        chat.disappearingMessages = normalizeDisappearingMessages({
+            ...(chat.disappearingMessages?.toObject?.() || {}),
+            ...(req.body.disappearingMessages || {}),
+        });
+
+        await chat.save();
+
+        res.json({ chat: await populateAndSanitizeChatById(chat._id, req.userId) });
+    } catch (error) {
+        res.status(error.statusCode || 500).json({ error: error.message || 'Server error' });
+    }
+};
+
+exports.createInviteLink = async (req, res) => {
+    try {
+        const chat = await Chat.findOne({
+            _id: req.params.id,
+            participants: req.userId,
+            isGroup: true,
+        });
+
+        if (!chat) {
+            return res.status(404).json({ error: 'Group not found' });
+        }
+
+        ensureGroupAdmin(chat, req.userId);
+
+        const code = randomUUID().replace(/-/g, '').slice(0, 12);
+        chat.inviteLinks.push({
+            code,
+            createdBy: req.userId,
+            createdAt: new Date(),
+            revokedAt: null,
+        });
+        await chat.save();
+
+        res.status(201).json({
+            inviteLink: {
+                code,
+                url: buildInviteUrl(code),
+            },
+            chat: await populateAndSanitizeChatById(chat._id, req.userId),
+        });
+    } catch (error) {
+        res.status(error.statusCode || 500).json({ error: error.message || 'Server error' });
+    }
+};
+
+exports.revokeInviteLink = async (req, res) => {
+    try {
+        const chat = await Chat.findOne({
+            _id: req.params.id,
+            participants: req.userId,
+            isGroup: true,
+        });
+
+        if (!chat) {
+            return res.status(404).json({ error: 'Group not found' });
+        }
+
+        ensureGroupAdmin(chat, req.userId);
+
+        const inviteLink = chat.inviteLinks.find((entry) => entry.code === req.params.code && !entry.revokedAt);
+        if (!inviteLink) {
+            return res.status(404).json({ error: 'Invite link not found' });
+        }
+
+        inviteLink.revokedAt = new Date();
+        await chat.save();
+
+        res.json({ chat: await populateAndSanitizeChatById(chat._id, req.userId) });
+    } catch (error) {
+        res.status(error.statusCode || 500).json({ error: error.message || 'Server error' });
+    }
+};
+
+exports.getInviteInfo = async (req, res) => {
+    try {
+        const chat = await findChatByInviteCode(req.params.code);
+
+        if (!chat) {
+            return res.status(404).json({ error: 'Invite link is invalid or expired' });
+        }
+
+        const alreadyJoined = (chat.participants || []).some((participant) => participant._id.toString() === req.userId.toString());
+        const pendingRequest = (chat.pendingJoinRequests || []).some((entry) => {
+            const requestUserId = entry.userId?._id || entry.userId;
+            return requestUserId?.toString() === req.userId.toString();
+        });
+
+        res.json({
+            invite: {
+                code: req.params.code,
+                groupName: chat.groupName || 'Group Chat',
+                groupAvatar: chat.groupAvatar || '',
+                memberCount: (chat.participants || []).length,
+                groupAdmin: chat.groupAdmin,
+                joinApprovalEnabled: !!chat.groupSettings?.joinApprovalEnabled,
+                alreadyJoined,
+                pendingRequest,
+            },
+        });
+    } catch (error) {
+        res.status(500).json({ error: 'Server error' });
+    }
+};
+
+exports.joinGroupViaInvite = async (req, res) => {
+    try {
+        const chat = await findChatByInviteCode.baseQuery(req.params.code);
+        if (!chat) {
+            return res.status(404).json({ error: 'Invite link is invalid or expired' });
+        }
+
+        if (chat.participants.some((participantId) => participantId.toString() === req.userId.toString())) {
+            return res.json({
+                joined: true,
+                pending: false,
+                chat: await populateAndSanitizeChatById(chat._id, req.userId),
+            });
+        }
+
+        if (chat.groupSettings?.joinApprovalEnabled) {
+            const existingRequest = (chat.pendingJoinRequests || []).some((entry) => entry.userId.toString() === req.userId.toString());
+            if (!existingRequest) {
+                chat.pendingJoinRequests.push({
+                    userId: req.userId,
+                    requestedAt: new Date(),
+                    viaCode: req.params.code,
+                });
+                await chat.save();
+            }
+
+            return res.json({
+                joined: false,
+                pending: true,
+                chat: await populateAndSanitizeChatById(chat._id, req.userId),
+            });
+        }
+
+        chat.participants.push(req.userId);
+        await chat.save();
+
+        res.json({
+            joined: true,
+            pending: false,
+            chat: await populateAndSanitizeChatById(chat._id, req.userId),
+        });
+    } catch (error) {
+        res.status(500).json({ error: 'Server error' });
+    }
+};
+
+exports.reviewJoinRequest = async (req, res) => {
+    try {
+        const { action, userId } = req.body;
+        if (!['accept', 'reject'].includes(action) || !userId) {
+            return res.status(400).json({ error: 'Action and user are required' });
+        }
+
+        const chat = await Chat.findOne({
+            _id: req.params.id,
+            participants: req.userId,
+            isGroup: true,
+        });
+
+        if (!chat) {
+            return res.status(404).json({ error: 'Group not found' });
+        }
+
+        ensureGroupAdmin(chat, req.userId);
+
+        const hasRequest = (chat.pendingJoinRequests || []).some((entry) => entry.userId.toString() === userId.toString());
+        if (!hasRequest) {
+            return res.status(404).json({ error: 'Join request not found' });
+        }
+
+        chat.pendingJoinRequests = chat.pendingJoinRequests.filter((entry) => entry.userId.toString() !== userId.toString());
+        if (action === 'accept' && !chat.participants.some((participantId) => participantId.toString() === userId.toString())) {
+            chat.participants.push(userId);
+        }
+        await chat.save();
+
+        res.json({ chat: await populateAndSanitizeChatById(chat._id, req.userId) });
+    } catch (error) {
+        res.status(error.statusCode || 500).json({ error: error.message || 'Server error' });
     }
 };
 
@@ -437,7 +691,7 @@ exports.respondToChatRequest = async (req, res) => {
             .populate('requestedBy', 'name username avatar')
             .populate('lastMessage');
 
-        res.json({ chat: populatedChat });
+        res.json({ chat: sanitizeChatForViewer(populatedChat, req.userId) });
     } catch (error) {
         res.status(500).json({ error: 'Server error' });
     }

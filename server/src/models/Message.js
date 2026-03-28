@@ -148,6 +148,10 @@ const messageSchema = new mongoose.Schema(
                 default: [],
             },
         },
+        expiresAt: {
+            type: Date,
+            default: null,
+        },
         isPinned: {
             type: Boolean,
             default: false,
@@ -170,6 +174,7 @@ const messageSchema = new mongoose.Schema(
 // Indexes for efficient queries
 messageSchema.index({ chatId: 1, createdAt: -1 });
 messageSchema.index({ chatId: 1, isPinned: 1, pinnedAt: -1 });
+messageSchema.index({ expiresAt: 1 });
 messageSchema.index({ senderId: 1 });
 
 module.exports = mongoose.model('Message', messageSchema);

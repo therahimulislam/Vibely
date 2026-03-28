@@ -222,6 +222,26 @@ const useAuthStore = create((set, get) => ({
         }
     },
 
+    saveChatDraft: async (chatId, text) => {
+        try {
+            const { data } = await api.put('/users/chat-draft', { chatId, text });
+            set((state) => ({
+                user: {
+                    ...state.user,
+                    ...data.user,
+                    preferences: {
+                        ...(state.user?.preferences || {}),
+                        ...(data.user?.preferences || {}),
+                        chatDrafts: data.chatDrafts || data.user?.preferences?.chatDrafts || [],
+                    },
+                },
+            }));
+            return data.chatDrafts || [];
+        } catch (error) {
+            throw new Error(error.response?.data?.error || 'Failed to save draft');
+        }
+    },
+
     addContact: async (userId) => {
         try {
             await api.post(`/users/contacts/${userId}`);
