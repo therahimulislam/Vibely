@@ -11,7 +11,7 @@ const geoip = require('geoip-lite');
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 const OTP_EXPIRY_MS = 10 * 60 * 1000;
 const GENERIC_VERIFICATION_MESSAGE = 'If an account needs verification, a code has been sent to the email provided.';
-const GENERIC_PASSWORD_RESET_MESSAGE = 'If an account exists for this email, a password reset code has been sent.';
+const PASSWORD_RESET_MESSAGE = 'Password reset OTP sent to your email.';
 
 const slugifyUsername = (value = '') => value
     .toLowerCase()
@@ -160,14 +160,16 @@ const sendOTP = async (email) => {
 const requestPasswordReset = async (email) => {
     const user = await User.findOne({ email }).select('+resetOtp +resetOtpExpiry');
 
-    if (user) {
-        const otp = generateOTP();
-        setResetOTP(user, otp);
-        await user.save();
-        await sendOTPEmail(email, otp);
+    if (!user) {
+        throw Object.assign(new Error('Account not found'), { statusCode: 404 });
     }
 
-    return { message: GENERIC_PASSWORD_RESET_MESSAGE };
+    const otp = generateOTP();
+    setResetOTP(user, otp);
+    await user.save();
+    await sendOTPEmail(email, otp);
+
+    return { message: PASSWORD_RESET_MESSAGE };
 };
 
 // Verify OTP

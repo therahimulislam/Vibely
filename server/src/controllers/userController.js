@@ -2,10 +2,45 @@
 // User controller - user search and profile management
 
 const User = require('../models/User');
+const Chat = require('../models/Chat');
+const Message = require('../models/Message');
 const { uploadAvatar } = require('../services/cloudinaryService');
 const fs = require('fs');
 
 const sanitizeUsername = (value = '') => value.trim().toLowerCase();
+const sanitizeUrl = (value = '') => {
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+    return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+};
+const sanitizeColor = (value = '') => {
+    const trimmed = value.trim();
+    return /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(trimmed) ? trimmed : '#6f6bff';
+};
+const normalizeFolderPayload = (folders = []) => folders
+    .filter(Boolean)
+    .slice(0, 8)
+    .map((folder, index) => ({
+        folderId: `${folder.folderId || folder.id || `folder-${index + 1}`}`.trim().slice(0, 60),
+        name: `${folder.name || ''}`.trim().slice(0, 24),
+        color: sanitizeColor(`${folder.color || '#6f6bff'}`),
+        chatIds: Array.from(new Set((folder.chatIds || []).filter(Boolean).map((id) => id.toString()))),
+    }))
+    .filter((folder) => folder.folderId && folder.name);
+const normalizeChatNotificationPayload = (payload = {}) => {
+    const mutedUntilValue = payload.mutedUntil ? new Date(payload.mutedUntil) : null;
+    const mutedUntil = mutedUntilValue && !Number.isNaN(mutedUntilValue.getTime())
+        ? mutedUntilValue
+        : null;
+
+    return {
+        chatId: payload.chatId?.toString?.() || '',
+        mutedUntil,
+        mentionsOnly: !!payload.mentionsOnly,
+        sound: payload.sound === 'silent' ? 'silent' : 'default',
+        desktop: !!payload.desktop,
+    };
+};
 const cleanupTempFile = (filePath) => {
     if (filePath) {
         fs.unlink(filePath, () => { });
@@ -17,6 +52,12 @@ const formatPublicUser = (user, currentUser) => ({
     name: user.name,
     username: user.username,
     avatar: user.avatar,
+    bio: user.bio || '',
+    socialLinks: {
+        website: user.socialLinks?.website || '',
+        instagram: user.socialLinks?.instagram || '',
+        x: user.socialLinks?.x || '',
+    },
     isOnline: user.isOnline,
     lastSeen: user.lastSeen,
     isContact: currentUser.contacts?.some((contactId) => contactId.toString() === user._id.toString()) || false,
@@ -57,11 +98,47 @@ exports.getContacts = async (req, res) => {
 // GET /api/users/:id - Get user profile
 exports.getUserById = async (req, res) => {
     try {
-        const user = await User.findById(req.params.id).select('name username avatar isOnline lastSeen');
+        const user = await User.findById(req.params.id).select('name username avatar bio socialLinks isOnline lastSeen createdAt');
         if (!user) {
             return res.status(404).json({ error: 'User not found' });
         }
-        res.json({ user: formatPublicUser(user, req.user) });
+
+        const mutualGroups = await Chat.find({
+            isGroup: true,
+            participants: { $all: [req.userId, user._id] },
+        })
+            .select('groupName groupAvatar participants')
+            .limit(4);
+
+        const sharedChatIds = await Chat.find({
+            participants: { $all: [req.userId, user._id] },
+        }).distinct('_id');
+
+        const sharedMedia = sharedChatIds.length > 0
+            ? await Message.find({
+                chatId: { $in: sharedChatIds },
+                type: { $in: ['image', 'video', 'audio', 'document'] },
+                isDeleted: { $ne: true },
+                'viewOnce.enabled': { $ne: true },
+            })
+                .sort({ createdAt: -1 })
+                .limit(8)
+                .select('type fileUrl fileName createdAt chatId')
+            : [];
+
+        res.json({
+            user: {
+                ...formatPublicUser(user, req.user),
+                createdAt: user.createdAt,
+                mutualGroups: mutualGroups.map((chat) => ({
+                    _id: chat._id,
+                    name: chat.groupName || 'Group Chat',
+                    avatar: chat.groupAvatar || '',
+                    memberCount: (chat.participants || []).length,
+                })),
+                sharedMedia,
+            },
+        });
     } catch (error) {
         res.status(500).json({ error: 'Server error' });
     }
@@ -79,6 +156,21 @@ exports.updateProfile = async (req, res) => {
                 return res.status(400).json({ error: 'Username is already taken' });
             }
             updates.username = username;
+        }
+        if (typeof req.body.bio === 'string') updates.bio = req.body.bio.trim().slice(0, 160);
+        if (req.body.socialLinks) {
+            const socialLinks = typeof req.body.socialLinks === 'string'
+                ? JSON.parse(req.body.socialLinks)
+                : req.body.socialLinks;
+
+            updates.socialLinks = {
+                website: sanitizeUrl(socialLinks?.website || ''),
+                instagram: (socialLinks?.instagram || '').trim(),
+                x: (socialLinks?.x || '').trim(),
+            };
+        }
+        if (req.body.chatTheme) {
+            updates['preferences.chatTheme'] = req.body.chatTheme;
         }
 
         // Handle avatar upload
@@ -119,6 +211,88 @@ exports.removeContact = async (req, res) => {
     try {
         await User.findByIdAndUpdate(req.userId, { $pull: { contacts: req.params.id } });
         res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: 'Server error' });
+    }
+};
+
+exports.updateChatFolders = async (req, res) => {
+    try {
+        const folders = normalizeFolderPayload(req.body.folders);
+        const uniqueChatIds = Array.from(new Set(folders.flatMap((folder) => folder.chatIds)));
+
+        if (uniqueChatIds.length > 0) {
+            const accessibleChatCount = await Chat.countDocuments({
+                _id: { $in: uniqueChatIds },
+                participants: req.userId,
+            });
+
+            if (accessibleChatCount !== uniqueChatIds.length) {
+                return res.status(400).json({ error: 'One or more selected chats are invalid' });
+            }
+        }
+
+        const user = await User.findByIdAndUpdate(
+            req.userId,
+            { 'preferences.chatFolders': folders },
+            { new: true }
+        );
+
+        res.json({
+            chatFolders: user?.preferences?.chatFolders || [],
+            user,
+        });
+    } catch (error) {
+        res.status(500).json({ error: 'Server error' });
+    }
+};
+
+exports.updateChatNotifications = async (req, res) => {
+    try {
+        const settings = normalizeChatNotificationPayload(req.body);
+        if (!settings.chatId) {
+            return res.status(400).json({ error: 'Chat ID is required' });
+        }
+
+        const chat = await Chat.findOne({
+            _id: settings.chatId,
+            participants: req.userId,
+        });
+
+        if (!chat) {
+            return res.status(400).json({ error: 'Chat not found' });
+        }
+
+        if (!chat.isGroup) {
+            settings.mentionsOnly = false;
+        }
+
+        const user = await User.findById(req.userId);
+        const currentSettings = user?.preferences?.chatNotifications || [];
+        const filteredSettings = currentSettings.filter((entry) => entry.chatId?.toString() !== settings.chatId);
+
+        const shouldPersist =
+            !!settings.mutedUntil ||
+            settings.mentionsOnly ||
+            settings.sound !== 'default' ||
+            settings.desktop;
+
+        user.preferences.chatNotifications = shouldPersist
+            ? [...filteredSettings, settings]
+            : filteredSettings;
+
+        await user.save();
+
+        res.json({
+            chatNotification: user.preferences.chatNotifications.find((entry) => entry.chatId?.toString() === settings.chatId) || {
+                chatId: settings.chatId,
+                mutedUntil: null,
+                mentionsOnly: false,
+                sound: 'default',
+                desktop: false,
+            },
+            user,
+        });
     } catch (error) {
         res.status(500).json({ error: 'Server error' });
     }

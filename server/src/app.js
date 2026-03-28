@@ -15,6 +15,8 @@ const userRoutes = require('./routes/userRoutes');
 const chatRoutes = require('./routes/chatRoutes');
 const messageRoutes = require('./routes/messageRoutes');
 const statusRoutes = require('./routes/statusRoutes');
+const bookmarkRoutes = require('./routes/bookmarkRoutes');
+const reminderRoutes = require('./routes/reminderRoutes');
 
 const app = express();
 
@@ -57,6 +59,8 @@ app.use('/api/users', userRoutes);
 app.use('/api/chats', chatRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/status', statusRoutes);
+app.use('/api/bookmarks', bookmarkRoutes);
+app.use('/api/reminders', reminderRoutes);
 
 app.get('/', (req, res) => {
     res.json({

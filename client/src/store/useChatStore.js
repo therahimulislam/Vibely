@@ -4,18 +4,129 @@
 import { create } from 'zustand';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
+import useAuthStore from './useAuthStore';
 
 const typingTimeouts = {};
+const sameId = (left, right) => String(left || '') === String(right || '');
+const applyPresenceToParticipants = (participants = [], onlineUsers = new Set(), fallbackLastSeen = null) =>
+    (participants || []).map((participant) => {
+        if (!participant) return participant;
+        const isOnline = onlineUsers instanceof Set ? onlineUsers.has(participant._id) : false;
+        return {
+            ...participant,
+            isOnline,
+            lastSeen: isOnline ? participant.lastSeen : (fallbackLastSeen || participant.lastSeen),
+        };
+    });
+
+const applyPresenceToChat = (chat, onlineUsers, targetUserId = null, isOnline = null, lastSeen = null) => {
+    if (!chat) return chat;
+
+    if (!targetUserId) {
+        return {
+            ...chat,
+            participants: applyPresenceToParticipants(chat.participants, onlineUsers),
+        };
+    }
+
+    return {
+        ...chat,
+        participants: (chat.participants || []).map((participant) => {
+            if (!participant || participant._id !== targetUserId) return participant;
+            return {
+                ...participant,
+                isOnline,
+                lastSeen: isOnline ? participant.lastSeen : (lastSeen || participant.lastSeen),
+            };
+        }),
+    };
+};
+
+const sortChatsByUpdatedAt = (chats = []) =>
+    [...chats].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+const sortScheduledMessagesByDate = (messages = []) =>
+    [...messages].sort((a, b) => new Date(a.scheduledFor) - new Date(b.scheduledFor));
+const sortPinnedMessagesByDate = (messages = []) =>
+    [...messages].sort((a, b) => new Date(b.pinnedAt || b.createdAt) - new Date(a.pinnedAt || a.createdAt));
+const sortBookmarkCollections = (collections = []) =>
+    [...collections].sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
+
+const getCurrentUserId = () => useAuthStore.getState().user?._id || null;
+
+const toggleUserInIdList = (list = [], userId, enabled) => {
+    if (!userId) return list || [];
+    const filtered = (list || []).filter((id) => !sameId(id, userId));
+    return enabled ? [...filtered, userId] : filtered;
+};
+
+const updateChatPreviewWithMessage = (chat, message) => {
+    if (!chat || !message || !sameId(chat._id, message.chatId)) return chat;
+
+    return {
+        ...chat,
+        lastMessage: message,
+        updatedAt: message.createdAt || new Date().toISOString(),
+        archivedBy: [],
+    };
+};
+
+const updateChatLastMessageIfMatching = (chat, message) => {
+    if (!chat || !message || !sameId(chat._id, message.chatId)) return chat;
+    if (!sameId(chat.lastMessage?._id, message._id)) return chat;
+
+    return {
+        ...chat,
+        lastMessage: message,
+    };
+};
+
+const updateChatLastMessageOnDelete = (chat, messageId) => {
+    if (!chat || !sameId(chat.lastMessage?._id, messageId)) return chat;
+
+    return {
+        ...chat,
+        lastMessage: {
+            ...chat.lastMessage,
+            isDeleted: true,
+            text: '',
+            fileUrl: '',
+            fileName: '',
+            fileSize: 0,
+        },
+    };
+};
+
+const upsertChat = (chats = [], nextChat) => {
+    if (!nextChat) return chats;
+    const exists = chats.some((chat) => sameId(chat._id, nextChat._id));
+    return sortChatsByUpdatedAt(
+        exists
+            ? chats.map((chat) => (sameId(chat._id, nextChat._id) ? nextChat : chat))
+            : [nextChat, ...chats]
+    );
+};
+
+const sortMessagesByCreatedAt = (messages = []) =>
+    [...messages].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
 const useChatStore = create((set, get) => ({
     chats: [],
     activeChat: null,
     messages: [],
+    replyingTo: null,
+    messageSearchResults: [],
+    isSearchingChatMessages: false,
+    scheduledMessages: [],
+    pinnedMessages: [],
+    bookmarkCollections: [],
     typingUsers: {},
     onlineUsers: new Set(),
     searchQuery: '',
     isLoadingChats: false,
     isLoadingMessages: false,
+    isLoadingScheduledMessages: false,
+    isLoadingPinnedMessages: false,
+    isLoadingBookmarkCollections: false,
     hasMoreMessages: false,
     currentPage: 1,
     error: null,
@@ -25,7 +136,11 @@ const useChatStore = create((set, get) => ({
         set({ isLoadingChats: true, error: null });
         try {
             const { data } = await api.get('/chats');
-            set({ chats: data.chats || [], isLoadingChats: false });
+            const onlineUsers = get().onlineUsers;
+            set({
+                chats: (data.chats || []).map((chat) => applyPresenceToChat(chat, onlineUsers)),
+                isLoadingChats: false,
+            });
         } catch (error) {
             set({
                 isLoadingChats: false,
@@ -37,9 +152,23 @@ const useChatStore = create((set, get) => ({
 
     // Set active chat and load messages
     setActiveChat: async (chat) => {
-        set({ activeChat: chat, messages: [], currentPage: 1, hasMoreMessages: false, error: null });
+        set({
+            activeChat: chat,
+            messages: [],
+            replyingTo: null,
+            messageSearchResults: [],
+            scheduledMessages: [],
+            pinnedMessages: [],
+            currentPage: 1,
+            hasMoreMessages: false,
+            error: null,
+        });
         if (chat) {
-            await get().fetchMessages(chat._id, 1);
+            await Promise.allSettled([
+                get().fetchMessages(chat._id, 1),
+                get().fetchScheduledMessages(chat._id),
+                get().fetchPinnedMessages(chat._id),
+            ]);
         }
     },
 
@@ -70,17 +199,196 @@ const useChatStore = create((set, get) => ({
         await get().fetchMessages(activeChat._id, currentPage + 1);
     },
 
+    fetchScheduledMessages: async (chatId) => {
+        if (!chatId) {
+            set({ scheduledMessages: [], isLoadingScheduledMessages: false });
+            return [];
+        }
+
+        set({ isLoadingScheduledMessages: true });
+        try {
+            const { data } = await api.get(`/messages/scheduled/${chatId}`);
+            const scheduledMessages = sortScheduledMessagesByDate(data.scheduledMessages || []);
+            set({ scheduledMessages, isLoadingScheduledMessages: false });
+            return scheduledMessages;
+        } catch (error) {
+            set({ isLoadingScheduledMessages: false, scheduledMessages: [] });
+            console.error('Failed to fetch scheduled messages:', error);
+            return [];
+        }
+    },
+
+    createScheduledMessage: async (payload) => {
+        try {
+            const config = payload instanceof FormData
+                ? { headers: { 'Content-Type': 'multipart/form-data' } }
+                : undefined;
+            const { data } = await api.post('/messages/scheduled', payload, config);
+            set((state) => ({
+                scheduledMessages: sortScheduledMessagesByDate([
+                    ...state.scheduledMessages.filter((message) => !sameId(message._id, data.scheduledMessage?._id)),
+                    data.scheduledMessage,
+                ]),
+            }));
+            toast.success('Message scheduled');
+            return data.scheduledMessage;
+        } catch (error) {
+            const message = error.response?.data?.error || 'Failed to schedule message';
+            toast.error(message);
+            throw error;
+        }
+    },
+
+    deleteScheduledMessage: async (scheduledMessageId) => {
+        try {
+            await api.delete(`/messages/scheduled/${scheduledMessageId}`);
+            set((state) => ({
+                scheduledMessages: state.scheduledMessages.filter((message) => !sameId(message._id, scheduledMessageId)),
+            }));
+            toast.success('Scheduled message removed');
+        } catch (error) {
+            const message = error.response?.data?.error || 'Failed to remove scheduled message';
+            toast.error(message);
+            throw error;
+        }
+    },
+
+    updateScheduledMessage: async (scheduledMessageId, payload) => {
+        try {
+            const { data } = await api.patch(`/messages/scheduled/${scheduledMessageId}`, payload);
+            set((state) => ({
+                scheduledMessages: sortScheduledMessagesByDate([
+                    ...state.scheduledMessages.filter((message) => !sameId(message._id, scheduledMessageId)),
+                    data.scheduledMessage,
+                ]),
+            }));
+            toast.success('Scheduled message updated');
+            return data.scheduledMessage;
+        } catch (error) {
+            const message = error.response?.data?.error || 'Failed to update scheduled message';
+            toast.error(message);
+            throw error;
+        }
+    },
+
+    removeScheduledMessageFromQueue: (scheduledMessageId) => {
+        if (!scheduledMessageId) return;
+        set((state) => ({
+            scheduledMessages: state.scheduledMessages.filter((message) => !sameId(message._id, scheduledMessageId)),
+        }));
+    },
+
+    fetchPinnedMessages: async (chatId) => {
+        if (!chatId) {
+            set({ pinnedMessages: [], isLoadingPinnedMessages: false });
+            return [];
+        }
+
+        set({ isLoadingPinnedMessages: true });
+        try {
+            const { data } = await api.get(`/messages/pins/${chatId}`);
+            const pinnedMessages = sortPinnedMessagesByDate(data.pinnedMessages || []);
+            set({ pinnedMessages, isLoadingPinnedMessages: false });
+            return pinnedMessages;
+        } catch (error) {
+            set({ isLoadingPinnedMessages: false, pinnedMessages: [] });
+            console.error('Failed to fetch pinned messages:', error);
+            return [];
+        }
+    },
+
+    fetchBookmarkCollections: async () => {
+        set({ isLoadingBookmarkCollections: true });
+        try {
+            const { data } = await api.get('/bookmarks');
+            const bookmarkCollections = sortBookmarkCollections(data.collections || []);
+            set({ bookmarkCollections, isLoadingBookmarkCollections: false });
+            return bookmarkCollections;
+        } catch (error) {
+            set({ isLoadingBookmarkCollections: false });
+            toast.error(error.response?.data?.error || 'Failed to load bookmark collections');
+            throw error;
+        }
+    },
+
+    createBookmarkCollection: async ({ name, color }) => {
+        try {
+            const { data } = await api.post('/bookmarks', { name, color });
+            set((state) => ({
+                bookmarkCollections: sortBookmarkCollections([
+                    data.collection,
+                    ...state.bookmarkCollections.filter((collection) => !sameId(collection._id, data.collection?._id)),
+                ]),
+            }));
+            toast.success('Collection created');
+            return data.collection;
+        } catch (error) {
+            toast.error(error.response?.data?.error || 'Failed to create collection');
+            throw error;
+        }
+    },
+
+    updateBookmarkCollection: async (collectionId, payload) => {
+        try {
+            const { data } = await api.patch(`/bookmarks/${collectionId}`, payload);
+            set((state) => ({
+                bookmarkCollections: sortBookmarkCollections(
+                    state.bookmarkCollections.map((collection) =>
+                        sameId(collection._id, collectionId) ? data.collection : collection
+                    )
+                ),
+            }));
+            toast.success('Collection updated');
+            return data.collection;
+        } catch (error) {
+            toast.error(error.response?.data?.error || 'Failed to update collection');
+            throw error;
+        }
+    },
+
+    deleteBookmarkCollection: async (collectionId) => {
+        try {
+            await api.delete(`/bookmarks/${collectionId}`);
+            set((state) => ({
+                bookmarkCollections: state.bookmarkCollections.filter((collection) => !sameId(collection._id, collectionId)),
+            }));
+            toast.success('Collection deleted');
+        } catch (error) {
+            toast.error(error.response?.data?.error || 'Failed to delete collection');
+            throw error;
+        }
+    },
+
+    toggleMessageInBookmarkCollection: async (collectionId, messageId) => {
+        try {
+            const { data } = await api.post(`/bookmarks/${collectionId}/messages`, { messageId });
+            set((state) => ({
+                bookmarkCollections: sortBookmarkCollections(
+                    state.bookmarkCollections.map((collection) =>
+                        sameId(collection._id, collectionId) ? data.collection : collection
+                    )
+                ),
+            }));
+            toast.success(data.saved ? 'Saved to collection' : 'Removed from collection');
+            return data.collection;
+        } catch (error) {
+            toast.error(error.response?.data?.error || 'Failed to update collection');
+            throw error;
+        }
+    },
+
     // Create or find 1-on-1 chat
     createChat: async (participantId) => {
         set({ error: null });
         try {
             const { data } = await api.post('/chats/create', { participantId });
+            const hydratedChat = applyPresenceToChat(data.chat, get().onlineUsers);
             if (data.isNew) {
-                set((state) => ({ chats: [data.chat, ...state.chats] }));
+                set((state) => ({ chats: [hydratedChat, ...state.chats] }));
             }
-            set({ activeChat: data.chat });
-            await get().fetchMessages(data.chat._id, 1);
-            return data.chat;
+            set({ activeChat: hydratedChat });
+            await get().fetchMessages(hydratedChat._id, 1);
+            return hydratedChat;
         } catch (error) {
             const msg = error.response?.data?.error || 'Failed to create chat';
             set({ error: msg });
@@ -89,37 +397,108 @@ const useChatStore = create((set, get) => ({
         }
     },
 
+    ensureSavedMessagesChat: async () => {
+        set({ error: null });
+        try {
+            const { data } = await api.post('/chats/saved');
+            const hydratedChat = applyPresenceToChat(data.chat, get().onlineUsers);
+
+            set((state) => ({
+                chats: upsertChat(state.chats, hydratedChat),
+            }));
+
+            return hydratedChat;
+        } catch (error) {
+            const msg = error.response?.data?.error || 'Failed to open Saved Messages';
+            set({ error: msg });
+            toast.error(msg);
+            throw error;
+        }
+    },
+
+    openSavedMessages: async () => {
+        const hydratedChat = await get().ensureSavedMessagesChat();
+        set({
+            activeChat: hydratedChat,
+            messages: [],
+            replyingTo: null,
+            messageSearchResults: [],
+            currentPage: 1,
+            hasMoreMessages: false,
+        });
+        await get().fetchMessages(hydratedChat._id, 1);
+        return hydratedChat;
+    },
+
     // Add message (from socket or API)
     addMessage: (message) => {
         set((state) => {
-            const exists = state.messages.some((m) => m._id === message._id);
-            if (exists) return state;
+            const existsInActiveChat = state.messages.some((m) => m._id === message._id);
+            const nextMessages = state.activeChat?._id === message.chatId && !existsInActiveChat
+                ? [...state.messages, message]
+                : state.messages;
 
-            // Update the chat's last message in the list
-            const updatedChats = state.chats.map((chat) => {
-                if (chat._id === message.chatId) {
-                    return { ...chat, lastMessage: message, updatedAt: new Date().toISOString() };
-                }
-                return chat;
-            });
-
-            // Sort chats by updatedAt
-            updatedChats.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+            const updatedChats = sortChatsByUpdatedAt(
+                state.chats.map((chat) => updateChatPreviewWithMessage(chat, message))
+            );
 
             return {
-                messages: [...state.messages, message],
+                messages: nextMessages,
                 chats: updatedChats,
+                activeChat: state.activeChat?._id === message.chatId
+                    ? {
+                        ...state.activeChat,
+                        lastMessage: message,
+                        updatedAt: message.createdAt || new Date().toISOString(),
+                        archivedBy: [],
+                    }
+                    : state.activeChat,
+                messageSearchResults: state.messageSearchResults.map((entry) =>
+                    sameId(entry._id, message._id) ? message : entry
+                ),
             };
         });
     },
 
     // Update message (edit, reaction, status)
     updateMessage: (updatedMessage) => {
-        set((state) => ({
-            messages: state.messages.map((m) =>
-                m._id === updatedMessage._id ? updatedMessage : m
-            ),
-        }));
+        set((state) => {
+            const shouldSyncPinnedBoard =
+                sameId(state.activeChat?._id, updatedMessage.chatId) ||
+                state.pinnedMessages.some((message) => sameId(message._id, updatedMessage._id));
+
+            return {
+                messages: state.messages.map((m) =>
+                    m._id === updatedMessage._id ? updatedMessage : m
+                ),
+                messageSearchResults: state.messageSearchResults.map((m) =>
+                    m._id === updatedMessage._id ? updatedMessage : m
+                ),
+                pinnedMessages: shouldSyncPinnedBoard
+                    ? (updatedMessage.isPinned
+                        ? sortPinnedMessagesByDate([
+                            ...state.pinnedMessages.filter((message) => !sameId(message._id, updatedMessage._id)),
+                            updatedMessage,
+                        ])
+                        : state.pinnedMessages.filter((message) => !sameId(message._id, updatedMessage._id)))
+                    : state.pinnedMessages,
+                chats: state.chats.map((chat) => updateChatLastMessageIfMatching(chat, updatedMessage)),
+                activeChat: updateChatLastMessageIfMatching(state.activeChat, updatedMessage),
+            };
+        });
+    },
+
+    openViewOnceMessage: async (messageId) => {
+        try {
+            const { data } = await api.post(`/messages/${messageId}/view-once/open`);
+            if (data.message) {
+                get().updateMessage(data.message);
+            }
+            return data;
+        } catch (error) {
+            toast.error(error.response?.data?.error || 'Failed to open protected media');
+            throw error;
+        }
     },
 
     // Delete message
@@ -129,7 +508,19 @@ const useChatStore = create((set, get) => ({
                 ? state.messages.map((m) =>
                     m._id === messageId ? { ...m, isDeleted: true, text: '', imageUrl: '', videoUrl: '' } : m
                 )
-                : state.messages.filter((m) => m._id !== messageId)
+                : state.messages.filter((m) => m._id !== messageId),
+            messageSearchResults: type === 'everyone'
+                ? state.messageSearchResults.map((m) =>
+                    m._id === messageId ? { ...m, isDeleted: true, text: '', imageUrl: '', videoUrl: '' } : m
+                )
+                : state.messageSearchResults.filter((m) => m._id !== messageId),
+            pinnedMessages: state.pinnedMessages.filter((message) => !sameId(message._id, messageId)),
+            chats: type === 'everyone'
+                ? state.chats.map((chat) => updateChatLastMessageOnDelete(chat, messageId))
+                : state.chats,
+            activeChat: type === 'everyone'
+                ? updateChatLastMessageOnDelete(state.activeChat, messageId)
+                : state.activeChat,
         }));
     },
 
@@ -155,15 +546,44 @@ const useChatStore = create((set, get) => ({
     togglePin: async (chatId) => {
         try {
             const { data } = await api.patch(`/chats/${chatId}/pin`);
+            const userId = getCurrentUserId();
             set((state) => ({
                 chats: state.chats.map((chat) =>
                     chat._id === chatId
-                        ? { ...chat, isPinned: data.pinned }
+                        ? { ...chat, pinnedBy: toggleUserInIdList(chat.pinnedBy, userId, data.pinned) }
                         : chat
                 ),
+                activeChat: state.activeChat?._id === chatId
+                    ? { ...state.activeChat, pinnedBy: toggleUserInIdList(state.activeChat.pinnedBy, userId, data.pinned) }
+                    : state.activeChat,
             }));
         } catch (error) {
             console.error('Failed to toggle pin:', error);
+        }
+    },
+
+    toggleArchiveChat: async (chatId) => {
+        try {
+            const { data } = await api.patch(`/chats/${chatId}/archive`);
+            const userId = getCurrentUserId();
+            set((state) => ({
+                chats: state.chats.map((chat) => {
+                    if (chat._id !== chatId) return chat;
+                    return {
+                        ...chat,
+                        archivedBy: toggleUserInIdList(chat.archivedBy, userId, data.archived),
+                    };
+                }),
+                activeChat: state.activeChat?._id === chatId
+                    ? {
+                        ...state.activeChat,
+                        archivedBy: toggleUserInIdList(state.activeChat.archivedBy, userId, data.archived),
+                    }
+                    : state.activeChat,
+            }));
+            toast.success(data.archived ? 'Chat archived' : 'Chat moved back to inbox');
+        } catch (error) {
+            toast.error(error.response?.data?.error || 'Failed to update chat archive');
         }
     },
 
@@ -227,24 +647,83 @@ const useChatStore = create((set, get) => ({
         set((state) => {
             const newSet = new Set(state.onlineUsers);
             newSet.add(userId);
-            return { onlineUsers: newSet };
+            return {
+                onlineUsers: newSet,
+                chats: state.chats.map((chat) => applyPresenceToChat(chat, newSet, userId, true)),
+                activeChat: applyPresenceToChat(state.activeChat, newSet, userId, true),
+            };
         });
     },
 
     setOnlineUsers: (userIds = []) => {
-        set({ onlineUsers: new Set(userIds) });
+        const onlineUsers = new Set(userIds);
+        set((state) => ({
+            onlineUsers,
+            chats: state.chats.map((chat) => applyPresenceToChat(chat, onlineUsers)),
+            activeChat: applyPresenceToChat(state.activeChat, onlineUsers),
+        }));
     },
 
-    setUserOffline: (userId) => {
+    setUserOffline: (userId, lastSeen = null) => {
         set((state) => {
             const newSet = new Set(state.onlineUsers);
             newSet.delete(userId);
-            return { onlineUsers: newSet };
+            return {
+                onlineUsers: newSet,
+                chats: state.chats.map((chat) => applyPresenceToChat(chat, newSet, userId, false, lastSeen)),
+                activeChat: applyPresenceToChat(state.activeChat, newSet, userId, false, lastSeen),
+            };
         });
     },
 
     // Search
     setSearchQuery: (query) => set({ searchQuery: query }),
+
+    setReplyingTo: (message) => set({ replyingTo: message }),
+
+    clearReplyingTo: () => set({ replyingTo: null }),
+
+    searchChatMessages: async (chatId, params = {}) => {
+        if (!chatId) return [];
+
+        set({ isSearchingChatMessages: true });
+        try {
+            const searchParams = new URLSearchParams();
+            Object.entries(params).forEach(([key, value]) => {
+                if (value !== undefined && value !== null && `${value}`.trim() !== '') {
+                    searchParams.set(key, value);
+                }
+            });
+
+            const { data } = await api.get(`/messages/${chatId}/search?${searchParams.toString()}`);
+            set({ messageSearchResults: data.results || [], isSearchingChatMessages: false });
+            return data.results || [];
+        } catch (error) {
+            set({ isSearchingChatMessages: false });
+            toast.error(error.response?.data?.error || 'Failed to search messages');
+            throw error;
+        }
+    },
+
+    clearChatSearch: () => set({ messageSearchResults: [], isSearchingChatMessages: false }),
+
+    insertMessageIfMissing: (message) => {
+        if (!message) return;
+        set((state) => {
+            if (!sameId(state.activeChat?._id, message.chatId)) {
+                return state;
+            }
+
+            const exists = state.messages.some((entry) => sameId(entry._id, message._id));
+            if (exists) {
+                return state;
+            }
+
+            return {
+                messages: sortMessagesByCreatedAt([...state.messages, message]),
+            };
+        });
+    },
 
     respondToRequest: async (chatId, action) => {
         try {
@@ -286,6 +765,42 @@ const useChatStore = create((set, get) => ({
             return data.message;
         } catch (error) {
             toast.error(error.response?.data?.error || 'Failed to vote on poll');
+            throw error;
+        }
+    },
+
+    toggleStarMessage: async (messageId) => {
+        try {
+            const { data } = await api.post(`/messages/${messageId}/star`);
+            get().updateMessage(data.message);
+            toast.success(data.starred ? 'Message starred' : 'Message unstarred');
+            return data.message;
+        } catch (error) {
+            toast.error(error.response?.data?.error || 'Failed to update starred message');
+            throw error;
+        }
+    },
+
+    togglePinMessage: async (messageId) => {
+        try {
+            const { data } = await api.post(`/messages/${messageId}/pin`);
+            get().updateMessage(data.message);
+            toast.success(data.pinned ? 'Message pinned' : 'Message unpinned');
+            return data.message;
+        } catch (error) {
+            toast.error(error.response?.data?.error || 'Failed to update pinned message');
+            throw error;
+        }
+    },
+
+    forwardMessage: async (messageId, chatId) => {
+        try {
+            const { data } = await api.post(`/messages/${messageId}/forward`, { chatId });
+            get().addMessage(data.message);
+            toast.success('Message forwarded');
+            return data.message;
+        } catch (error) {
+            toast.error(error.response?.data?.error || 'Failed to forward message');
             throw error;
         }
     },

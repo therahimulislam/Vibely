@@ -170,7 +170,56 @@ const useAuthStore = create((set, get) => ({
 
     // Update user in store
     updateUser: (updates) => {
-        set((state) => ({ user: { ...state.user, ...updates } }));
+        set((state) => ({
+            user: {
+                ...state.user,
+                ...updates,
+                preferences: {
+                    ...(state.user?.preferences || {}),
+                    ...(updates?.preferences || {}),
+                },
+            },
+        }));
+    },
+
+    saveChatFolders: async (folders) => {
+        try {
+            const { data } = await api.put('/users/chat-folders', { folders });
+            set((state) => ({
+                user: {
+                    ...state.user,
+                    ...data.user,
+                    preferences: {
+                        ...(state.user?.preferences || {}),
+                        ...(data.user?.preferences || {}),
+                        chatFolders: data.chatFolders || data.user?.preferences?.chatFolders || [],
+                    },
+                },
+            }));
+            return data.chatFolders || [];
+        } catch (error) {
+            throw new Error(error.response?.data?.error || 'Failed to save chat folders');
+        }
+    },
+
+    saveChatNotificationSettings: async (payload) => {
+        try {
+            const { data } = await api.put('/users/chat-notifications', payload);
+            set((state) => ({
+                user: {
+                    ...state.user,
+                    ...data.user,
+                    preferences: {
+                        ...(state.user?.preferences || {}),
+                        ...(data.user?.preferences || {}),
+                        chatNotifications: data.user?.preferences?.chatNotifications || [],
+                    },
+                },
+            }));
+            return data.chatNotification;
+        } catch (error) {
+            throw new Error(error.response?.data?.error || 'Failed to save notification settings');
+        }
     },
 
     addContact: async (userId) => {

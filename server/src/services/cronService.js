@@ -3,10 +3,201 @@
 
 const cron = require('node-cron');
 const Message = require('../models/Message');
+const ScheduledMessage = require('../models/ScheduledMessage');
+const Reminder = require('../models/Reminder');
+const Chat = require('../models/Chat');
 const Status = require('../models/Status');
 const { deleteImage } = require('./cloudinaryService');
+const { sanitizeMessageForViewer } = require('../utils/messageVisibility');
 
-const initCronJobs = () => {
+const MESSAGE_SENDER_FIELDS = 'name avatar username';
+const REPLY_PREVIEW_FIELDS = 'text type fileUrl fileName createdAt isDeleted poll forwardedFrom';
+const getMediaResourceType = (messageType = 'image', explicitType = '') => {
+    if (explicitType) return explicitType;
+    if (messageType === 'document') return 'raw';
+    if (messageType === 'video' || messageType === 'audio') return 'video';
+    return 'image';
+};
+
+const populateMessage = (messageId) => Message.findById(messageId)
+    .populate('senderId', MESSAGE_SENDER_FIELDS)
+    .populate('reactions.userId', 'name')
+    .populate({
+        path: 'replyTo',
+        select: `${REPLY_PREVIEW_FIELDS} senderId`,
+        populate: {
+            path: 'senderId',
+            select: MESSAGE_SENDER_FIELDS,
+        },
+    });
+
+const populateReminder = (reminderId) => Reminder.findById(reminderId).populate({
+    path: 'messageId',
+    populate: [
+        { path: 'senderId', select: MESSAGE_SENDER_FIELDS },
+        {
+            path: 'chatId',
+            select: 'isGroup isSavedMessages groupName groupAvatar participants',
+            populate: {
+                path: 'participants',
+                select: MESSAGE_SENDER_FIELDS,
+            },
+        },
+    ],
+});
+
+const normalizeReminder = (reminder, userId) => {
+    const plain = typeof reminder?.toObject === 'function'
+        ? reminder.toObject({ depopulate: false })
+        : reminder;
+
+    return {
+        ...plain,
+        messageId: plain?.messageId ? sanitizeMessageForViewer(plain.messageId, userId) : null,
+    };
+};
+
+const canDeliverScheduledMessage = (chat, senderId) => {
+    if (!chat || !chat.participants.some((participantId) => participantId.toString() === senderId.toString())) {
+        return false;
+    }
+
+    if (!chat.isGroup && chat.requestStatus === 'rejected') {
+        return false;
+    }
+
+    if (!chat.isGroup && chat.requestStatus === 'pending' && chat.requestedBy?.toString() !== senderId.toString()) {
+        return false;
+    }
+
+    return true;
+};
+
+const emitScheduledMessage = (io, chat, message, senderId, scheduledMessageId) => {
+    if (!io) return;
+
+    io.to(`user:${senderId}`).emit('messageSent', {
+        message,
+        chatId: chat._id.toString(),
+        scheduledMessageId,
+    });
+
+    chat.participants.forEach((participantId) => {
+        const recipientId = participantId.toString();
+        if (recipientId === senderId.toString()) return;
+
+        io.to(`user:${recipientId}`).emit('receiveMessage', {
+            message: sanitizeMessageForViewer(message, recipientId),
+            chatId: chat._id.toString(),
+        });
+    });
+};
+
+const dispatchDueReminders = async (io) => {
+    const now = new Date();
+    const reminders = await Reminder.find({
+        status: 'scheduled',
+        remindAt: { $lte: now },
+    })
+        .sort({ remindAt: 1, createdAt: 1 })
+        .limit(50);
+
+    for (const reminder of reminders) {
+        try {
+            reminder.status = 'triggered';
+            reminder.triggeredAt = now;
+            await reminder.save();
+
+            const populatedReminder = await populateReminder(reminder._id);
+            if (!populatedReminder?.messageId) {
+                await Reminder.findByIdAndDelete(reminder._id);
+                continue;
+            }
+
+            io?.to(`user:${reminder.userId}`).emit('reminderDue', {
+                reminder: normalizeReminder(populatedReminder, reminder.userId),
+            });
+        } catch (error) {
+            console.error('❌ Reminder delivery error:', error);
+        }
+    }
+};
+
+const dispatchDueScheduledMessages = async (io) => {
+    const now = new Date();
+    const dueMessages = await ScheduledMessage.find({
+        scheduledFor: { $lte: now },
+    })
+        .sort({ scheduledFor: 1, createdAt: 1 })
+        .limit(50);
+
+    for (const scheduledMessage of dueMessages) {
+        try {
+            const chat = await Chat.findById(scheduledMessage.chatId);
+
+            if (!canDeliverScheduledMessage(chat, scheduledMessage.senderId)) {
+                if (scheduledMessage.publicId) {
+                    await deleteImage(
+                        scheduledMessage.publicId,
+                        getMediaResourceType(scheduledMessage.type, scheduledMessage.mediaResourceType)
+                    );
+                }
+                await ScheduledMessage.findByIdAndDelete(scheduledMessage._id);
+                continue;
+            }
+
+            const message = await Message.create({
+                chatId: scheduledMessage.chatId,
+                senderId: scheduledMessage.senderId,
+                text: scheduledMessage.text,
+                replyTo: scheduledMessage.replyTo,
+                type: scheduledMessage.type,
+                fileUrl: scheduledMessage.fileUrl,
+                fileName: scheduledMessage.fileName,
+                fileSize: scheduledMessage.fileSize,
+                publicId: scheduledMessage.publicId,
+                mediaResourceType: scheduledMessage.mediaResourceType,
+                viewOnce: {
+                    enabled: !!scheduledMessage.viewOnce?.enabled,
+                    durationSeconds: scheduledMessage.viewOnce?.durationSeconds || 10,
+                    views: [],
+                },
+                status: 'sent',
+            });
+
+            chat.lastMessage = message._id;
+            chat.updatedAt = new Date();
+            chat.deletedBy = [];
+            chat.archivedBy = [];
+
+            chat.participants.forEach((participantId) => {
+                if (participantId.toString() !== scheduledMessage.senderId.toString()) {
+                    const currentUnreadCount = chat.unreadCount.get(participantId.toString()) || 0;
+                    chat.unreadCount.set(participantId.toString(), currentUnreadCount + 1);
+                }
+            });
+
+            await chat.save();
+            await ScheduledMessage.findByIdAndDelete(scheduledMessage._id);
+
+            const populatedMessage = await populateMessage(message._id);
+            emitScheduledMessage(io, chat, populatedMessage, scheduledMessage.senderId, scheduledMessage._id.toString());
+        } catch (error) {
+            console.error('❌ Scheduled message delivery error:', error);
+        }
+    }
+};
+
+const initCronJobs = (io) => {
+    cron.schedule('* * * * *', async () => {
+        try {
+            await dispatchDueScheduledMessages(io);
+            await dispatchDueReminders(io);
+        } catch (error) {
+            console.error('❌ Scheduled delivery/reminder cron error:', error);
+        }
+    });
+
     // Run every hour
     cron.schedule('0 * * * *', async () => {
         console.log('⏳ Running retention cron job...');
@@ -39,16 +230,9 @@ const initCronJobs = () => {
                 console.log(`Found ${mediaMessages.length} expired media messages`);
                 for (const msg of mediaMessages) {
                     if (msg.publicId) {
-                        await deleteImage(msg.publicId, msg.type === 'video' ? 'video' : 'image');
+                        await deleteImage(msg.publicId, getMediaResourceType(msg.type, msg.mediaResourceType));
                     }
-                    // We can either delete the message entirely or just clear the file
-                    // Use case implies "stored in server for 24hrs", so we likely delete the message
                     await Message.findByIdAndDelete(msg._id);
-                    // Or keep text? "Text message is stored for 7 days". 
-                    // If it has text + image, maybe we should just clear image?
-                    // But simpler interpretation: if it IS an image message, delete it.
-                    // If it is 'text' type but happens to have attachments, that's different.
-                    // Our model has 'type' which dictates the main content.
                 }
             }
 
@@ -63,7 +247,7 @@ const initCronJobs = () => {
                 console.log(`Found ${oldMessages.length} expired old messages`);
                 for (const msg of oldMessages) {
                     if (msg.publicId) {
-                        await deleteImage(msg.publicId, msg.type === 'video' ? 'video' : 'image');
+                        await deleteImage(msg.publicId, getMediaResourceType(msg.type, msg.mediaResourceType));
                     }
                     await Message.findByIdAndDelete(msg._id);
                 }
@@ -74,7 +258,7 @@ const initCronJobs = () => {
         }
     });
 
-    console.log('✅ Retention cron jobs initialized');
+    console.log('✅ Retention, scheduled delivery, and reminder cron jobs initialized');
 };
 
 module.exports = { initCronJobs };

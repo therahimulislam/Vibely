@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, Eye, Trash2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import useStatusStore from '../../store/useStatusStore';
+import AvatarFallback from '../ui/AvatarFallback';
 
 const DURATION_MS = 5000;
 
@@ -9,6 +10,7 @@ export default function StatusViewer({ group, isOwn, onClose }) {
     const { markViewed, deleteStatus } = useStatusStore();
     const [index, setIndex] = useState(0);
     const [showViewers, setShowViewers] = useState(false);
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
     const items = useMemo(() => group?.items || [], [group]);
     const activeItem = items[index];
@@ -62,7 +64,7 @@ export default function StatusViewer({ group, isOwn, onClose }) {
                     </div>
                 )}
 
-                <div className="absolute top-0 left-0 right-0 z-20 p-4">
+                <div className="absolute top-0 left-0 right-0 z-20 p-3 sm:p-4">
                     <div className="flex gap-1.5 mb-4">
                         {items.map((item, itemIndex) => (
                             <div key={item._id} className="h-1 flex-1 rounded-full bg-white/20 overflow-hidden">
@@ -73,15 +75,13 @@ export default function StatusViewer({ group, isOwn, onClose }) {
                         ))}
                     </div>
 
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-3">
                         <div className="flex items-center gap-3">
                             <div className="w-11 h-11 rounded-full overflow-hidden ring-2 ring-white/20">
                                 {group.user.avatar ? (
                                     <img src={group.user.avatar} alt={group.user.name} className="w-full h-full object-cover" />
                                 ) : (
-                                    <div className="w-full h-full flex items-center justify-center text-white font-bold bg-white/10">
-                                        {group.user.name?.[0]?.toUpperCase() || '?'}
-                                    </div>
+                                    <AvatarFallback name={group.user.name} />
                                 )}
                             </div>
                             <div>
@@ -91,13 +91,13 @@ export default function StatusViewer({ group, isOwn, onClose }) {
                                 </p>
                             </div>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-shrink-0">
                             {isOwn && (
                                 <>
                                     <button onClick={() => setShowViewers((value) => !value)} className="p-2 rounded-full bg-white/10 hover:bg-white/15 text-white">
                                         <Eye className="w-4 h-4" />
                                     </button>
-                                    <button onClick={handleDelete} className="p-2 rounded-full bg-white/10 hover:bg-white/15 text-white">
+                                    <button onClick={() => setShowDeleteConfirm(true)} className="p-2 rounded-full bg-white/10 hover:bg-white/15 text-white">
                                         <Trash2 className="w-4 h-4" />
                                     </button>
                                 </>
@@ -112,14 +112,14 @@ export default function StatusViewer({ group, isOwn, onClose }) {
                 <button
                     onClick={() => setIndex((current) => Math.max(0, current - 1))}
                     disabled={index === 0}
-                    className="absolute left-2 sm:left-3 top-1/2 -translate-y-1/2 z-20 p-2 rounded-full bg-white/10 text-white disabled:opacity-30"
+                    className="absolute left-2 sm:left-3 top-1/2 -translate-y-1/2 z-20 p-2 rounded-full bg-white/10 text-white disabled:opacity-30 hidden sm:inline-flex"
                 >
                     <ChevronLeft className="w-5 h-5" />
                 </button>
 
                 <button
                     onClick={() => index < items.length - 1 ? setIndex((current) => current + 1) : onClose()}
-                    className="absolute right-2 sm:right-3 top-1/2 -translate-y-1/2 z-20 p-2 rounded-full bg-white/10 text-white"
+                    className="absolute right-2 sm:right-3 top-1/2 -translate-y-1/2 z-20 p-2 rounded-full bg-white/10 text-white hidden sm:inline-flex"
                 >
                     <ChevronRight className="w-5 h-5" />
                 </button>
@@ -142,7 +142,7 @@ export default function StatusViewer({ group, isOwn, onClose }) {
                 )}
 
                 {isOwn && showViewers && (
-                    <div className="absolute left-3 right-3 sm:left-auto sm:right-4 bottom-20 z-30 sm:w-[260px] rounded-3xl bg-black/65 backdrop-blur-xl border border-white/10 p-4 text-white">
+                    <div className="absolute left-3 right-3 sm:left-auto sm:right-4 bottom-20 z-30 sm:w-[260px] rounded-3xl bg-black/65 backdrop-blur-xl border border-white/10 p-4 text-white max-h-[40vh] sm:max-h-none">
                         <div className="flex items-center justify-between mb-3">
                             <h4 className="text-sm font-semibold">Seen By</h4>
                             <span className="text-xs text-white/50">{activeItem.viewersCount}</span>
@@ -163,6 +163,34 @@ export default function StatusViewer({ group, isOwn, onClose }) {
                             ) : (
                                 <p className="text-xs text-white/50">No views yet</p>
                             )}
+                        </div>
+                    </div>
+                )}
+
+                {isOwn && showDeleteConfirm && (
+                    <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/45 backdrop-blur-sm p-4">
+                        <div className="w-full max-w-xs rounded-3xl border border-white/10 bg-[#14141d]/90 p-5 text-white shadow-2xl">
+                            <h4 className="text-base font-semibold">Delete status?</h4>
+                            <p className="text-sm text-white/65 mt-2">
+                                Are you sure you want to delete this status?
+                            </p>
+                            <div className="mt-5 flex items-center justify-end gap-3">
+                                <button
+                                    onClick={() => setShowDeleteConfirm(false)}
+                                    className="px-4 py-2 rounded-xl bg-white/8 hover:bg-white/12 text-sm transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={async () => {
+                                        setShowDeleteConfirm(false);
+                                        await handleDelete();
+                                    }}
+                                    className="px-4 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-sm font-medium transition-colors"
+                                >
+                                    Okay
+                                </button>
+                            </div>
                         </div>
                     </div>
                 )}

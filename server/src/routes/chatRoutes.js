@@ -9,11 +9,14 @@ const { authenticate } = require('../middleware/auth');
 router.use(authenticate);
 
 router.get('/', chatController.getChats);
+router.get('/:id/assets', chatController.getChatAssets);
+router.post('/saved', chatController.getSavedMessagesChat);
 router.post('/create', chatController.createChat);
 router.post('/group', chatController.createGroupChat);
 router.put('/group/add', chatController.addToGroup);
 router.patch('/:id/request', chatController.respondToChatRequest);
 router.patch('/:id/pin', chatController.togglePinChat);
+router.patch('/:id/archive', chatController.toggleArchiveChat);
 router.delete('/:id', chatController.deleteChat);
 
 module.exports = router;

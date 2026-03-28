@@ -18,6 +18,18 @@ const VIDEO_MIME_TYPES = new Set([
     'video/quicktime',
 ]);
 
+const AUDIO_MIME_TYPES = new Set([
+    'audio/mpeg',
+    'audio/mp3',
+    'audio/wav',
+    'audio/x-wav',
+    'audio/webm',
+    'audio/ogg',
+    'audio/mp4',
+    'audio/aac',
+    'audio/x-m4a',
+]);
+
 const DOCUMENT_MIME_TYPES = new Set([
     'application/pdf',
     'text/plain',
@@ -34,6 +46,7 @@ const DOCUMENT_MIME_TYPES = new Set([
 const MESSAGE_ALLOWED_TYPES = new Set([
     ...IMAGE_MIME_TYPES,
     ...VIDEO_MIME_TYPES,
+    ...AUDIO_MIME_TYPES,
     ...DOCUMENT_MIME_TYPES,
 ]);
 

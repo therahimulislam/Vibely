@@ -3,10 +3,47 @@
 
 const Chat = require('../models/Chat');
 const User = require('../models/User');
+const Message = require('../models/Message');
+const { sanitizeMessageForViewer } = require('../utils/messageVisibility');
 
 const USER_PUBLIC_FIELDS = 'name username avatar isOnline lastSeen';
+const MESSAGE_SENDER_FIELDS = 'name username avatar';
+const LINK_PATTERN = /(https?:\/\/[^\s]+|www\.[^\s]+)/i;
 const areMutualContacts = (user, otherUserId) =>
     user.contacts?.some((id) => id.toString() === otherUserId.toString());
+const chatPopulateQuery = [
+    { path: 'participants', select: USER_PUBLIC_FIELDS },
+    { path: 'groupAdmin', select: 'name username avatar' },
+    { path: 'requestedBy', select: 'name username avatar' },
+    { path: 'lastMessage' },
+];
+
+const populateChatQuery = (query) => chatPopulateQuery.reduce(
+    (builder, populateConfig) => builder.populate(populateConfig),
+    query
+);
+const sanitizeChatForViewer = (chat, userId) => {
+    const plain = typeof chat?.toObject === 'function' ? chat.toObject({ depopulate: false }) : chat;
+    if (!plain) return plain;
+
+    return {
+        ...plain,
+        lastMessage: plain.lastMessage ? sanitizeMessageForViewer(plain.lastMessage, userId) : null,
+    };
+};
+
+const ensureChatParticipant = async (chatId, userId) => {
+    const chat = await Chat.findOne({
+        _id: chatId,
+        participants: userId,
+    });
+
+    if (!chat) {
+        throw Object.assign(new Error('Access denied'), { statusCode: 403 });
+    }
+
+    return chat;
+};
 
 // GET /api/chats - Get all chats for current user
 exports.getChats = async (req, res) => {
@@ -17,13 +54,105 @@ exports.getChats = async (req, res) => {
             requestStatus: { $ne: 'rejected' },
         })
             .populate('participants', USER_PUBLIC_FIELDS)
+            .populate('groupAdmin', 'name username avatar')
             .populate('requestedBy', 'name username avatar')
             .populate('lastMessage')
             .sort({ updatedAt: -1 });
 
-        res.json({ chats });
+        res.json({ chats: chats.map((chat) => sanitizeChatForViewer(chat, req.userId)) });
     } catch (error) {
         res.status(500).json({ error: 'Server error' });
+    }
+};
+
+// POST /api/chats/saved - Create or return Saved Messages chat
+exports.getSavedMessagesChat = async (req, res) => {
+    try {
+        let chat = await populateChatQuery(
+            Chat.findOne({
+                isSavedMessages: true,
+                participants: { $size: 1, $all: [req.userId] },
+            })
+        );
+
+        if (!chat) {
+            chat = await Chat.create({
+                participants: [req.userId],
+                requestStatus: 'accepted',
+                isSavedMessages: true,
+            });
+
+            chat = await populateChatQuery(Chat.findById(chat._id));
+        }
+
+        res.json({ chat: sanitizeChatForViewer(chat, req.userId) });
+    } catch (error) {
+        res.status(500).json({ error: 'Server error' });
+    }
+};
+
+// GET /api/chats/:id/assets - Get shared assets for a chat
+exports.getChatAssets = async (req, res) => {
+    try {
+        const { id: chatId } = req.params;
+        const tab = `${req.query.tab || 'media'}`.toLowerCase();
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 24, 1), 60);
+
+        await ensureChatParticipant(chatId, req.userId);
+
+        const baseConditions = {
+            chatId,
+            isDeleted: { $ne: true },
+            deletedFor: { $ne: req.userId },
+            'viewOnce.enabled': { $ne: true },
+        };
+
+        const tabConditions = {
+            media: { type: { $in: ['image', 'video'] } },
+            docs: { type: 'document' },
+            voice: { type: 'audio' },
+            links: { text: LINK_PATTERN },
+        };
+
+        const conditions = {
+            ...baseConditions,
+            ...(tabConditions[tab] || tabConditions.media),
+        };
+
+        const [mediaCount, documentCount, voiceCount, linkCount, messages] = await Promise.all([
+            Message.countDocuments({ ...baseConditions, type: { $in: ['image', 'video'] } }),
+            Message.countDocuments({ ...baseConditions, type: 'document' }),
+            Message.countDocuments({ ...baseConditions, type: 'audio' }),
+            Message.countDocuments({ ...baseConditions, text: LINK_PATTERN }),
+            Message.find(conditions)
+                .sort({ createdAt: -1 })
+                .limit(limit)
+                .populate('senderId', MESSAGE_SENDER_FIELDS)
+                .select('chatId senderId text type fileUrl fileName fileSize createdAt'),
+        ]);
+
+        const items = messages.map((message) => {
+            const plain = message.toObject();
+            const matchedLink = plain.text?.match(LINK_PATTERN)?.[0] || '';
+            return {
+                ...plain,
+                primaryUrl: matchedLink
+                    ? (/^https?:\/\//i.test(matchedLink) ? matchedLink : `https://${matchedLink}`)
+                    : '',
+            };
+        });
+
+        res.json({
+            items,
+            counts: {
+                media: mediaCount,
+                docs: documentCount,
+                voice: voiceCount,
+                links: linkCount,
+            },
+        });
+    } catch (error) {
+        res.status(error.statusCode || 500).json({ error: error.message || 'Server error' });
     }
 };
 
@@ -72,7 +201,7 @@ exports.createChat = async (req, res) => {
                     .populate('requestedBy', 'name username avatar')
                     .populate('lastMessage');
             }
-            return res.json({ chat, isNew: false });
+            return res.json({ chat: sanitizeChatForViewer(chat, req.userId), isNew: false });
         }
 
         const requester = await User.findById(req.userId).select('contacts');
@@ -90,7 +219,7 @@ exports.createChat = async (req, res) => {
             .populate('requestedBy', 'name username avatar')
             .populate('lastMessage');
 
-        res.status(201).json({ chat, isNew: true });
+        res.status(201).json({ chat: sanitizeChatForViewer(chat, req.userId), isNew: true });
     } catch (error) {
         res.status(500).json({ error: 'Server error' });
     }
@@ -136,7 +265,7 @@ exports.createGroupChat = async (req, res) => {
             .populate('participants', USER_PUBLIC_FIELDS)
             .populate('groupAdmin', 'name username avatar');
 
-        res.status(201).json({ chat: populatedChat });
+        res.status(201).json({ chat: sanitizeChatForViewer(populatedChat, req.userId) });
     } catch (error) {
         console.error('Create group error:', error);
         res.status(500).json({ error: 'Server error' });
@@ -164,6 +293,32 @@ exports.togglePinChat = async (req, res) => {
 
         await chat.save();
         res.json({ pinned: !isPinned });
+    } catch (error) {
+        res.status(500).json({ error: 'Server error' });
+    }
+};
+
+// PATCH /api/chats/:id/archive - Toggle archive for current user
+exports.toggleArchiveChat = async (req, res) => {
+    try {
+        const chat = await Chat.findById(req.params.id);
+        if (!chat) {
+            return res.status(404).json({ error: 'Chat not found' });
+        }
+
+        if (!chat.participants.some((id) => id.toString() === req.userId.toString())) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+
+        const isArchived = chat.archivedBy?.some((id) => id.toString() === req.userId.toString());
+        if (isArchived) {
+            chat.archivedBy = chat.archivedBy.filter((id) => id.toString() !== req.userId.toString());
+        } else {
+            chat.archivedBy.push(req.userId);
+        }
+
+        await chat.save();
+        res.json({ archived: !isArchived });
     } catch (error) {
         res.status(500).json({ error: 'Server error' });
     }

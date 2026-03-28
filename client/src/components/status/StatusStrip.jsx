@@ -1,5 +1,6 @@
 import { Plus, Zap } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
+import AvatarFallback from '../ui/AvatarFallback';
 
 const formatTime = (date) => {
     try {
@@ -16,7 +17,7 @@ const StatusAvatar = ({ user, hasUnviewed, onClick, label }) => (
                 {user?.avatar ? (
                     <img src={user.avatar} alt={user.name} className="w-full h-full object-cover" />
                 ) : (
-                    <span className="text-sm font-bold text-white">{user?.name?.[0]?.toUpperCase() || '?'}</span>
+                    <AvatarFallback name={user?.name} className="text-sm" />
                 )}
             </div>
         </div>

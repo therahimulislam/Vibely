@@ -41,9 +41,14 @@ const messageSchema = new mongoose.Schema(
             trim: true,
             default: '',
         },
+        replyTo: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Message',
+            default: null,
+        },
         type: {
             type: String,
-            enum: ['text', 'image', 'video', 'document', 'poll'],
+            enum: ['text', 'image', 'video', 'audio', 'document', 'poll'],
             default: 'text',
         },
         fileUrl: {
@@ -62,6 +67,10 @@ const messageSchema = new mongoose.Schema(
             type: String,
             default: '',
         },
+        mediaResourceType: {
+            type: String,
+            default: '',
+        },
         deletedFor: [
             {
                 type: mongoose.Schema.Types.ObjectId,
@@ -73,6 +82,12 @@ const messageSchema = new mongoose.Schema(
             enum: ['sent', 'delivered', 'seen'],
             default: 'sent',
         },
+        starredBy: [
+            {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: 'User',
+            },
+        ],
         reactions: [
             {
                 userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
@@ -98,6 +113,54 @@ const messageSchema = new mongoose.Schema(
                 default: [],
             },
         },
+        forwardedFrom: {
+            messageId: {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: 'Message',
+                default: null,
+            },
+            senderName: {
+                type: String,
+                trim: true,
+                default: '',
+            },
+        },
+        viewOnce: {
+            enabled: {
+                type: Boolean,
+                default: false,
+            },
+            durationSeconds: {
+                type: Number,
+                default: 10,
+            },
+            views: {
+                type: [{
+                    userId: {
+                        type: mongoose.Schema.Types.ObjectId,
+                        ref: 'User',
+                    },
+                    viewedAt: {
+                        type: Date,
+                        default: Date.now,
+                    },
+                }],
+                default: [],
+            },
+        },
+        isPinned: {
+            type: Boolean,
+            default: false,
+        },
+        pinnedAt: {
+            type: Date,
+            default: null,
+        },
+        pinnedBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            default: null,
+        },
     },
     {
         timestamps: true,
@@ -106,6 +169,7 @@ const messageSchema = new mongoose.Schema(
 
 // Indexes for efficient queries
 messageSchema.index({ chatId: 1, createdAt: -1 });
+messageSchema.index({ chatId: 1, isPinned: 1, pinnedAt: -1 });
 messageSchema.index({ senderId: 1 });
 
 module.exports = mongoose.model('Message', messageSchema);

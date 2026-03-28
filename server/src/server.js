@@ -18,9 +18,6 @@ const PORT = process.env.PORT || 5000;
 // Create HTTP server
 const server = http.createServer(app);
 
-// Initialize Cron Jobs
-initCronJobs();
-
 // Initialize Socket.io
 const io = new Server(server, {
     cors: {
@@ -32,6 +29,9 @@ const io = new Server(server, {
     pingInterval: 25000,
 });
 app.set('io', io);
+
+// Initialize Cron Jobs
+initCronJobs(io);
 
 // Startup sequence
 const startServer = async () => {

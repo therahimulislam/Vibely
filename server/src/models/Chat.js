@@ -23,11 +23,21 @@ const chatSchema = new mongoose.Schema(
                 ref: 'User',
             },
         ],
+        archivedBy: [
+            {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: 'User',
+            },
+        ],
         groupName: {
             type: String,
             default: '',
         },
         isGroup: {
+            type: Boolean,
+            default: false,
+        },
+        isSavedMessages: {
             type: Boolean,
             default: false,
         },

@@ -1,21 +1,22 @@
 // client/src/App.jsx
 // Main application with routing, auth initialization, and theme management
 
-import { useEffect, useState } from 'react';
+import { Suspense, lazy, useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { GoogleOAuthProvider } from '@react-oauth/google';
 import { Toaster } from 'react-hot-toast';
 import useAuthStore from './store/useAuthStore';
 import useSocket from './hooks/useSocket';
-import Login from './pages/Login';
-import Signup from './pages/Signup';
-import VerifyOTP from './pages/VerifyOTP';
-import ForgotPassword from './pages/ForgotPassword';
-import Chat from './pages/Chat';
-import VideoCall from './components/call/VideoCall';
-import IncomingCall from './components/call/IncomingCall';
+import { applyChatThemePreset, DEFAULT_CHAT_THEME } from './utils/themePresets';
 
-import ManageSessions from './pages/ManageSessions';
+const Login = lazy(() => import('./pages/Login'));
+const Signup = lazy(() => import('./pages/Signup'));
+const VerifyOTP = lazy(() => import('./pages/VerifyOTP'));
+const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
+const Chat = lazy(() => import('./pages/Chat'));
+const ManageSessions = lazy(() => import('./pages/ManageSessions'));
+const VideoCall = lazy(() => import('./components/call/VideoCall'));
+const IncomingCall = lazy(() => import('./components/call/IncomingCall'));
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
 const AuthProvider = ({ children }) => (
@@ -46,22 +47,30 @@ const AuthRoute = ({ children }) => {
     return isAuthenticated ? <Navigate to="/" replace /> : children;
 };
 
+const RouteLoader = () => (
+    <div className="h-screen flex items-center justify-center">
+        <div className="glass-card px-5 py-3 text-sm opacity-70">Loading Vibely...</div>
+    </div>
+);
+
 function AppContent() {
     useSocket(); // Initialize socket connection
 
     return (
         <>
-            <Routes>
-                <Route path="/login" element={<AuthRoute><Login /></AuthRoute>} />
-                <Route path="/signup" element={<AuthRoute><Signup /></AuthRoute>} />
-                <Route path="/verify-otp" element={<VerifyOTP />} />
-                <Route path="/forgot-password" element={<AuthRoute><ForgotPassword /></AuthRoute>} />
-                <Route path="/" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
-                <Route path="/settings/sessions" element={<ProtectedRoute><ManageSessions /></ProtectedRoute>} />
-                <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-            <VideoCall />
-            <IncomingCall />
+            <Suspense fallback={<RouteLoader />}>
+                <Routes>
+                    <Route path="/login" element={<AuthRoute><Login /></AuthRoute>} />
+                    <Route path="/signup" element={<AuthRoute><Signup /></AuthRoute>} />
+                    <Route path="/verify-otp" element={<VerifyOTP />} />
+                    <Route path="/forgot-password" element={<AuthRoute><ForgotPassword /></AuthRoute>} />
+                    <Route path="/" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
+                    <Route path="/settings/sessions" element={<ProtectedRoute><ManageSessions /></ProtectedRoute>} />
+                    <Route path="*" element={<Navigate to="/" replace />} />
+                </Routes>
+                <VideoCall />
+                <IncomingCall />
+            </Suspense>
             <Toaster
                 position="top-center"
                 toastOptions={{
@@ -81,11 +90,12 @@ function AppContent() {
 }
 
 export default function App() {
-    const { initialize } = useAuthStore();
+    const { initialize, user } = useAuthStore();
     const [isDark, setIsDark] = useState(() => {
         const saved = localStorage.getItem('theme');
         return saved ? saved === 'dark' : true;
     });
+    const [chatTheme, setChatTheme] = useState(() => localStorage.getItem('chatThemePreset') || DEFAULT_CHAT_THEME);
 
     // Initialize auth
     useEffect(() => {
@@ -99,9 +109,24 @@ export default function App() {
         localStorage.setItem('theme', isDark ? 'dark' : 'light');
     }, [isDark]);
 
+    useEffect(() => {
+        const userTheme = user?.preferences?.chatTheme;
+        if (userTheme) {
+            setChatTheme(userTheme);
+            return;
+        }
+        setChatTheme(localStorage.getItem('chatThemePreset') || DEFAULT_CHAT_THEME);
+    }, [user?.preferences?.chatTheme]);
+
+    useEffect(() => {
+        applyChatThemePreset(chatTheme);
+        localStorage.setItem('chatThemePreset', chatTheme);
+    }, [chatTheme]);
+
     // Expose theme toggle globally
     window.__toggleTheme = () => setIsDark((d) => !d);
     window.__isDark = isDark;
+    window.__setChatTheme = (theme) => setChatTheme(theme || DEFAULT_CHAT_THEME);
 
     return (
         <AuthProvider>

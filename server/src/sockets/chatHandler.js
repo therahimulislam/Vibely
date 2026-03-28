@@ -2,9 +2,21 @@
 
 const Message = require('../models/Message');
 const Chat = require('../models/Chat');
+const { sanitizeMessageForViewer } = require('../utils/messageVisibility');
 
 module.exports = (io, socket, onlineUsers) => {
     const senderFields = 'name avatar username';
+    const populateMessage = (messageId) => Message.findById(messageId)
+        .populate('senderId', senderFields)
+        .populate('reactions.userId', 'name')
+        .populate({
+            path: 'replyTo',
+            select: 'text type fileUrl fileName createdAt isDeleted poll forwardedFrom viewOnce senderId',
+            populate: {
+                path: 'senderId',
+                select: senderFields,
+            },
+        });
     const getChatForUser = async (chatId) => Chat.findOne({
         _id: chatId,
         participants: socket.userId,
@@ -24,7 +36,7 @@ module.exports = (io, socket, onlineUsers) => {
             if (recipientId === socketUserId) return;
 
             getSocketIdsForUser(recipientId).forEach((socketId) => {
-                io.to(socketId).emit(eventName, data);
+                io.to(socketId).emit(eventName, typeof data === 'function' ? data(recipientId) : data);
             });
         });
     };
@@ -43,7 +55,7 @@ module.exports = (io, socket, onlineUsers) => {
 
     socket.on('sendMessage', async (data) => {
         try {
-            const { chatId, text, tempId } = data;
+            const { chatId, text, tempId, replyTo } = data;
             const normalizedText = typeof text === 'string' ? text.trim() : '';
             const chat = await getChatForUser(chatId);
 
@@ -63,15 +75,27 @@ module.exports = (io, socket, onlineUsers) => {
                 return;
             }
 
+            let replyMessageId = null;
+            if (replyTo) {
+                const replyMessage = await Message.findOne({ _id: replyTo, chatId });
+                if (!replyMessage) {
+                    socket.emit('messageError', { error: 'Reply target not found in this chat' });
+                    return;
+                }
+                replyMessageId = replyMessage._id;
+            }
+
             const message = await Message.create({
                 chatId,
                 senderId: socket.userId,
                 text: normalizedText,
+                replyTo: replyMessageId,
                 status: 'sent',
             });
 
             chat.lastMessage = message._id;
             chat.updatedAt = new Date();
+            chat.archivedBy = [];
 
             chat.participants.forEach((participantId) => {
                 if (participantId.toString() !== socket.userId) {
@@ -82,7 +106,7 @@ module.exports = (io, socket, onlineUsers) => {
 
             await chat.save();
 
-            const populated = await Message.findById(message._id).populate('senderId', senderFields);
+            const populated = await populateMessage(message._id);
 
             let delivered = false;
             chat.participants.forEach((participantId) => {
@@ -92,7 +116,7 @@ module.exports = (io, socket, onlineUsers) => {
                 getSocketIdsForUser(recipientId).forEach((socketId) => {
                     delivered = true;
                     io.to(socketId).emit('receiveMessage', {
-                        message: populated,
+                        message: sanitizeMessageForViewer(populated, recipientId),
                         chatId,
                     });
                 });
@@ -188,12 +212,12 @@ module.exports = (io, socket, onlineUsers) => {
 
             await message.save();
 
-            const populated = await Message.findById(messageId)
-                .populate('senderId', senderFields)
-                .populate('reactions.userId', 'name');
+            const populated = await populateMessage(messageId);
 
-            socket.emit('messageUpdated', { message: populated });
-            await notifyChatParticipants(message.chatId, 'messageUpdated', { message: populated }, socket.userId);
+            socket.emit('messageUpdated', { message: sanitizeMessageForViewer(populated, socket.userId) });
+            await notifyChatParticipants(message.chatId, 'messageUpdated', (viewerId) => ({
+                message: sanitizeMessageForViewer(populated, viewerId),
+            }), socket.userId);
         } catch (error) {
             console.error('Reaction error:', error);
         }
@@ -217,6 +241,11 @@ module.exports = (io, socket, onlineUsers) => {
                 message.fileName = '';
                 message.fileSize = 0;
                 message.publicId = '';
+                message.mediaResourceType = '';
+                message.viewOnce = { enabled: false, durationSeconds: 10, views: [] };
+                message.isPinned = false;
+                message.pinnedAt = null;
+                message.pinnedBy = null;
                 await message.save();
 
                 socket.emit('messageDeleted', { messageId, chatId: activeChatId, type: 'everyone' });
@@ -253,10 +282,12 @@ module.exports = (io, socket, onlineUsers) => {
             message.isEdited = true;
             await message.save();
 
-            const populated = await Message.findById(messageId).populate('senderId', senderFields);
+            const populated = await populateMessage(messageId);
 
-            socket.emit('messageUpdated', { message: populated });
-            await notifyChatParticipants(message.chatId, 'messageUpdated', { message: populated }, socket.userId);
+            socket.emit('messageUpdated', { message: sanitizeMessageForViewer(populated, socket.userId) });
+            await notifyChatParticipants(message.chatId, 'messageUpdated', (viewerId) => ({
+                message: sanitizeMessageForViewer(populated, viewerId),
+            }), socket.userId);
         } catch (error) {
             console.error('Edit error:', error);
         }

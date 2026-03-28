@@ -4,6 +4,62 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
+const chatFolderSchema = new mongoose.Schema(
+    {
+        folderId: {
+            type: String,
+            required: true,
+            trim: true,
+        },
+        name: {
+            type: String,
+            required: true,
+            trim: true,
+            maxlength: 24,
+        },
+        color: {
+            type: String,
+            trim: true,
+            default: '#6f6bff',
+        },
+        chatIds: [
+            {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: 'Chat',
+            },
+        ],
+    },
+    { _id: false }
+);
+
+const chatNotificationSchema = new mongoose.Schema(
+    {
+        chatId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Chat',
+            required: true,
+        },
+        mutedUntil: {
+            type: Date,
+            default: null,
+        },
+        mentionsOnly: {
+            type: Boolean,
+            default: false,
+        },
+        sound: {
+            type: String,
+            enum: ['default', 'silent'],
+            default: 'default',
+        },
+        desktop: {
+            type: Boolean,
+            default: false,
+        },
+    },
+    { _id: false }
+);
+
 const userSchema = new mongoose.Schema(
     {
         name: {
@@ -43,6 +99,44 @@ const userSchema = new mongoose.Schema(
         avatar: {
             type: String,
             default: '',
+        },
+        bio: {
+            type: String,
+            trim: true,
+            maxlength: 160,
+            default: '',
+        },
+        socialLinks: {
+            website: {
+                type: String,
+                trim: true,
+                default: '',
+            },
+            instagram: {
+                type: String,
+                trim: true,
+                default: '',
+            },
+            x: {
+                type: String,
+                trim: true,
+                default: '',
+            },
+        },
+        preferences: {
+            chatTheme: {
+                type: String,
+                enum: ['aurora', 'ocean', 'ember', 'forest'],
+                default: 'aurora',
+            },
+            chatFolders: {
+                type: [chatFolderSchema],
+                default: [],
+            },
+            chatNotifications: {
+                type: [chatNotificationSchema],
+                default: [],
+            },
         },
         lastSeen: {
             type: Date,

@@ -17,6 +17,8 @@ const getInitialState = () => ({
     isInCall: false,
     isCalling: false,
     isReceivingCall: false,
+    isMinimized: false,
+    showParticipants: false,
     callMode: 'direct',
     callType: 'video',
     chatId: null,
@@ -31,6 +33,7 @@ const getInitialState = () => ({
     isAudioMuted: false,
     isVideoOff: false,
     isScreenSharing: false,
+    callStartedAt: null,
 });
 
 const useCallStore = create((set, get) => ({
@@ -85,6 +88,8 @@ const useCallStore = create((set, get) => ({
     clearIncomingCall: () => {
         set({
             isReceivingCall: false,
+            isMinimized: false,
+            showParticipants: false,
             callerId: null,
             callerInfo: null,
             recipientId: null,
@@ -98,10 +103,17 @@ const useCallStore = create((set, get) => ({
     },
 
     callConnected: () => {
-        set({ isInCall: true, isCalling: false, isReceivingCall: false });
+        set((state) => ({
+            isInCall: true,
+            isCalling: false,
+            isReceivingCall: false,
+            callStartedAt: state.callStartedAt || Date.now(),
+        }));
     },
 
     setLocalStream: (stream) => set({ localStream: stream }),
+    setMinimized: (isMinimized) => set({ isMinimized }),
+    setShowParticipants: (showParticipants) => set({ showParticipants }),
 
     syncRemoteParticipants: (participants = []) => {
         set((state) => {

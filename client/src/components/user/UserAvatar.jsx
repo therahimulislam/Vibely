@@ -1,6 +1,8 @@
 // client/src/components/user/UserAvatar.jsx
 // Reusable user avatar component
 
+import AvatarFallback from '../ui/AvatarFallback';
+
 export default function UserAvatar({ user, size = 'md', showOnline = false }) {
     const sizes = {
         sm: 'w-8 h-8 text-xs',
@@ -15,10 +17,7 @@ export default function UserAvatar({ user, size = 'md', showOnline = false }) {
                 {user?.avatar ? (
                     <img src={user.avatar} alt={user.name} className="w-full h-full object-cover" />
                 ) : (
-                    <div className="w-full h-full flex items-center justify-center text-white font-bold"
-                        style={{ background: 'var(--gradient-accent)' }}>
-                        {user?.name?.[0]?.toUpperCase() || '?'}
-                    </div>
+                    <AvatarFallback name={user?.name} className="text-inherit" />
                 )}
             </div>
             {showOnline && user?.isOnline && (
