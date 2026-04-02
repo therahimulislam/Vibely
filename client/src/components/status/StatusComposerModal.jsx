@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import { useMemo, useState } from 'react';
 import { ImagePlus, Sparkles, Type, Video, X } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -61,8 +62,8 @@ export default function StatusComposerModal({ onClose }) {
         }
     };
 
-    return (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-3 sm:p-4">
+    return createPortal(
+        <div className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-md flex items-center justify-center p-3 sm:p-4">
             <div className="glass-card w-full max-w-xl p-4 sm:p-5 max-h-[92dvh] overflow-y-auto">
                 <div className="flex items-center justify-between mb-4">
                     <div>
@@ -139,6 +140,7 @@ export default function StatusComposerModal({ onClose }) {
                     </button>
                 </div>
             </div>
-        </div>
+        </div>,
+        document.body
     );
 }

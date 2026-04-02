@@ -46,7 +46,7 @@ export default function StatusViewer({ group, isOwn, onClose }) {
     };
 
     return (
-        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-2 sm:p-4">
+        <div className="fixed inset-0 z-[9999] bg-black/90 flex items-center justify-center p-0 sm:p-4">
             <div className="w-full max-w-md h-[100dvh] sm:h-[78vh] sm:max-h-[780px] rounded-none sm:rounded-[32px] overflow-hidden relative shadow-2xl border-0 sm:border border-white/10">
                 <div
                     className="absolute inset-0"

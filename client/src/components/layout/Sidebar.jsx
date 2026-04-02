@@ -2,6 +2,7 @@
 // Left sidebar with header, search, chat list, and new chat
 
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Search, Plus, Settings, LogOut, MessageCircle, X, Users, Check, UserRoundPlus, UserRoundMinus, Sparkles, Bookmark, Trash2, BellRing, Link2 } from 'lucide-react';
 import useAuthStore from '../../store/useAuthStore';
 import useChatStore from '../../store/useChatStore';
@@ -35,6 +36,7 @@ export default function Sidebar({ onProfileClick }) {
     } = useChatStore();
     const { myStatuses, statuses, fetchStatuses, isLoading: isLoadingStatuses } = useStatusStore();
     const { reminders, isLoadingReminders, fetchReminders, deleteReminder } = useReminderStore();
+    const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
     const [showNewChat, setShowNewChat] = useState(false);
     const [showNewGroup, setShowNewGroup] = useState(false);
     const [showJoinGroup, setShowJoinGroup] = useState(false);
@@ -395,6 +397,7 @@ export default function Sidebar({ onProfileClick }) {
         : null;
 
     return (
+        <>
         <div className="w-full h-full min-w-0 flex flex-col glass-panel surface-elevated overflow-hidden">
             {/* Header */}
             <div className="p-3.5 sm:p-5 flex items-center justify-between gap-3 flex-shrink-0 border-b border-white/5">
@@ -439,7 +442,7 @@ export default function Sidebar({ onProfileClick }) {
                         <Plus className="w-4 h-4 opacity-65" />
                     </button>
                     <button
-                        onClick={logout}
+                        onClick={() => setShowLogoutConfirm(true)}
                         className="icon-button hover:!border-red-400/20 hover:!bg-red-500/10 !w-10 !h-10 sm:!w-[42px] sm:!h-[42px]"
                         title="Logout"
                     >
@@ -448,8 +451,10 @@ export default function Sidebar({ onProfileClick }) {
                 </div>
             </div>
 
+            {/* Scrollable upper content: search + status strip + new chat panel */}
+            <div className="flex-shrink min-h-0 overflow-y-auto">
             {/* Search chats */}
-            <div className="px-3.5 sm:px-5 py-3.5 sm:py-4 flex-shrink-0 space-y-4">
+            <div className="px-3.5 sm:px-5 py-3.5 sm:py-4 space-y-4">
                 <div className="surface-muted p-3 sm:p-3.5">
                     <div className="flex items-center justify-between gap-3 mb-3">
                         <div>
@@ -721,6 +726,8 @@ export default function Sidebar({ onProfileClick }) {
                 onOpenGroup={handleOpenStatusGroup}
             />
 
+            </div> {/* end scrollable upper content */}
+
             {/* New Chat / Group Panel */}
             {(showNewChat || showNewGroup || showJoinGroup) && (
                 <div className="px-3.5 sm:px-5 pb-4 flex-shrink-0 animate-slide-up">
@@ -919,12 +926,13 @@ export default function Sidebar({ onProfileClick }) {
                 <StatusComposerModal onClose={() => setShowStatusComposer(false)} />
             )}
 
-            {activeStatusGroup && (
+            {activeStatusGroup && createPortal(
                 <StatusViewer
                     group={activeStatusGroup}
                     isOwn={isOwnStatusGroup}
                     onClose={() => setActiveStatusUserId(null)}
-                />
+                />,
+                document.body
             )}
 
             {showCollections && (
@@ -1081,5 +1089,51 @@ export default function Sidebar({ onProfileClick }) {
                 </div>
             )}
         </div>
+
+            {/* Logout Confirmation Modal */}
+            {showLogoutConfirm && (
+                <div
+                    className="fixed inset-0 z-[999] flex items-center justify-center p-4"
+                    style={{ backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', backgroundColor: 'rgba(0,0,0,0.55)' }}
+                    onClick={() => setShowLogoutConfirm(false)}
+                >
+                    <div
+                        className="relative w-full max-w-sm rounded-[28px] border border-white/10 p-6 shadow-2xl animate-slide-up"
+                        style={{ background: 'var(--surface-elevated, rgba(22,22,35,0.96))' }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        {/* Icon */}
+                        <div className="flex justify-center mb-5">
+                            <div className="w-16 h-16 rounded-full flex items-center justify-center" style={{ background: 'rgba(239,68,68,0.12)', border: '1.5px solid rgba(239,68,68,0.25)' }}>
+                                <LogOut className="w-7 h-7 text-red-400" />
+                            </div>
+                        </div>
+
+                        {/* Text */}
+                        <div className="text-center mb-6">
+                            <h3 className="text-base font-bold tracking-tight mb-1.5">Log out of Vibely?</h3>
+                            <p className="text-sm opacity-50 leading-relaxed">You will be signed out of your account on this device. Your messages and data will remain safe.</p>
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex flex-col gap-2.5">
+                            <button
+                                onClick={() => { logout(); setShowLogoutConfirm(false); }}
+                                className="w-full py-3 rounded-2xl text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-[0.98]"
+                                style={{ background: 'linear-gradient(135deg, #ef4444, #dc2626)', boxShadow: '0 8px 24px rgba(239,68,68,0.3)' }}
+                            >
+                                Yes, Log Out
+                            </button>
+                            <button
+                                onClick={() => setShowLogoutConfirm(false)}
+                                className="w-full py-3 rounded-2xl text-sm font-semibold transition-all hover:bg-white/8 active:scale-[0.98] border border-white/10"
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </>
     );
 }
