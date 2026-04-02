@@ -789,6 +789,10 @@ export default function MessageArea({ onBack, onProfileClick }) {
                                         (msgs[index - 1]?.senderId?._id || msgs[index - 1]?.senderId) !==
                                         (message.senderId?._id || message.senderId)
                                     }
+                                    onOpenUserProfile={(senderUser) => {
+                                        if (!senderUser?._id) return;
+                                        onProfileClick?.({ mode: 'user', user: senderUser, chat: activeChat });
+                                    }}
                                 />
                             </div>
                         ))}

@@ -46,6 +46,10 @@ export default function MessageInput({
     const [editingScheduledMessage, setEditingScheduledMessage] = useState(null);
     const [scheduledEditText, setScheduledEditText] = useState('');
     const [viewOnceEnabled, setViewOnceEnabled] = useState(false);
+    const [showGif, setShowGif] = useState(false);
+    const [gifSearch, setGifSearch] = useState('');
+    const [gifResults, setGifResults] = useState([]);
+    const [isLoadingGifs, setIsLoadingGifs] = useState(false);
     const inputRef = useRef(null);
     const fileInputRef = useRef(null);
     const typingTimeoutRef = useRef(null);
@@ -126,7 +130,8 @@ export default function MessageInput({
     }, [chatId, savedDraftText, clearReplyingTo]);
 
     useEffect(() => {
-        if (!media || !['image', 'video'].includes(mediaType)) {
+        // Clear view-once only for non-media types (document) or when media is removed
+        if (!media || mediaType === 'document') {
             setViewOnceEnabled(false);
         }
     }, [media, mediaType]);
@@ -761,13 +766,38 @@ export default function MessageInput({
                             className="h-32 rounded-xl object-cover border border-white/10"
                         />
                     )}
-                    {viewOnceEnabled && ['image', 'video'].includes(mediaType) && (
-                        <div className="mt-2">
-                            <span className="badge-pill bg-primary-500/15 text-primary-200 border-primary-400/20">
-                                <EyeOff className="w-3.5 h-3.5" />
-                                View once
-                            </span>
-                        </div>
+                    {/* View-once prominent toggle button (shown for image, video, audio) */}
+                    {media && ['image', 'video', 'audio'].includes(mediaType) && (
+                        <button
+                            type="button"
+                            onClick={() => setViewOnceEnabled(v => !v)}
+                            className={`mt-2.5 w-full flex items-center gap-3 rounded-2xl border px-4 py-3 text-left transition-all ${
+                                viewOnceEnabled
+                                    ? 'border-primary-400/35 bg-primary-500/10 text-primary-100'
+                                    : 'border-white/8 bg-white/4 hover:bg-white/7'
+                            }`}
+                            disabled={composerDisabled || isSending}
+                        >
+                            <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 transition-all ${viewOnceEnabled ? 'text-white' : 'opacity-50'}`}
+                                style={viewOnceEnabled ? { background: 'var(--gradient-primary)', boxShadow: '0 4px 12px rgba(124,109,255,0.4)' } : { background: 'rgba(255,255,255,0.06)' }}>
+                                <EyeOff className="w-4 h-4" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold">
+                                    {viewOnceEnabled ? 'View once — enabled' : 'View once'}
+                                </p>
+                                <p className="text-[11px] opacity-45 mt-0.5">
+                                    {viewOnceEnabled
+                                        ? 'Recipient can only open this once.'
+                                        : 'Tap to let recipient open only once.'}
+                                </p>
+                            </div>
+                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all ${
+                                viewOnceEnabled ? 'bg-primary-500 border-primary-400' : 'border-white/25'
+                            }`}>
+                                {viewOnceEnabled && <div className="w-2 h-2 rounded-full bg-white" />}
+                            </div>
+                        </button>
                     )}
                     <button
                         onClick={() => { setMedia(null); setMediaPreview(null); setMediaType('text'); setViewOnceEnabled(false); }}
@@ -790,16 +820,105 @@ export default function MessageInput({
 
             {/* Quick emoji bar */}
             {showEmoji && (
-                <div className="mb-2 flex gap-1 overflow-x-auto pb-1 animate-slide-up no-scrollbar">
-                    {quickEmojis.map((emoji) => (
-                        <button
-                            key={emoji}
-                            onClick={() => { setText((t) => t + emoji); inputRef.current?.focus(); }}
-                            className="p-1.5 rounded-lg hover:bg-white/10 transition-transform hover:scale-125 text-xl"
-                        >
-                            {emoji}
+                <div className="mb-2 glass-card p-3 animate-slide-up">
+                    <div className="text-[10px] uppercase tracking-widest opacity-35 mb-2 px-1">Emoji</div>
+                    <div className="flex flex-wrap gap-0.5 max-h-28 overflow-y-auto">
+                        {quickEmojis.map((emoji) => (
+                            <button
+                                key={emoji}
+                                onClick={() => { setText((t) => t + emoji); setShowEmoji(false); inputRef.current?.focus(); }}
+                                className="p-1.5 rounded-lg hover:bg-white/10 transition-transform hover:scale-125 text-xl"
+                            >
+                                {emoji}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* GIF Picker */}
+            {showGif && (
+                <div className="mb-2 glass-card p-3 animate-slide-up">
+                    <div className="flex items-center gap-2 mb-2">
+                        <input
+                            type="text"
+                            value={gifSearch}
+                            onChange={async (e) => {
+                                const q = e.target.value;
+                                setGifSearch(q);
+                                setIsLoadingGifs(true);
+                                try {
+                                    const endpoint = q.trim()
+                                        ? `https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(q)}&key=AIzaSyAyimkuYQYF_FXVALexPmv_EjrN9qFpEQo&client_key=vibely&limit=12`
+                                        : `https://tenor.googleapis.com/v2/featured?key=AIzaSyAyimkuYQYF_FXVALexPmv_EjrN9qFpEQo&client_key=vibely&limit=12`;
+                                    const res = await fetch(endpoint);
+                                    const data = await res.json();
+                                    setGifResults((data.results || []).map(r => ({
+                                        id: r.id,
+                                        url: r.media_formats?.gif?.url || r.media_formats?.tinygif?.url || '',
+                                        preview: r.media_formats?.tinygif?.url || r.media_formats?.gif?.url || '',
+                                    })).filter(g => g.url));
+                                } catch { /* ignore */ } finally { setIsLoadingGifs(false); }}} 
+                            placeholder="Search GIFs... (Powered by Tenor)"
+                            className="input-glass py-1.5 text-sm flex-1"
+                            autoFocus
+                            onFocus={async () => {
+                                if (gifResults.length > 0) return;
+                                setIsLoadingGifs(true);
+                                try {
+                                    const res = await fetch('https://tenor.googleapis.com/v2/featured?key=AIzaSyAyimkuYQYF_FXVALexPmv_EjrN9qFpEQo&client_key=vibely&limit=12');
+                                    const data = await res.json();
+                                    setGifResults((data.results || []).map(r => ({
+                                        id: r.id,
+                                        url: r.media_formats?.gif?.url || r.media_formats?.tinygif?.url || '',
+                                        preview: r.media_formats?.tinygif?.url || r.media_formats?.gif?.url || '',
+                                    })).filter(g => g.url));
+                                } catch { /* ignore */ } finally { setIsLoadingGifs(false); }
+                            }}
+                        />
+                        <button onClick={() => setShowGif(false)} className="p-1.5 rounded-lg hover:bg-white/10">
+                            <X className="w-4 h-4 opacity-50" />
                         </button>
-                    ))}
+                    </div>
+                    {isLoadingGifs ? (
+                        <div className="flex justify-center py-4">
+                            <div className="w-5 h-5 border-2 border-primary-400/30 border-t-primary-400 rounded-full animate-spin" />
+                        </div>
+                    ) : (
+                        <div className="gif-grid max-h-48 overflow-y-auto">
+                            {gifResults.map(gif => (
+                                <button
+                                    key={gif.id}
+                                    className="gif-item"
+                                    onClick={async () => {
+                                        setShowGif(false);
+                                        setGifSearch('');
+                                        if (isSending || composerDisabled) return;
+                                        setIsSending(true);
+                                        try {
+                                            const { data } = await api.post('/messages/send-gif', {
+                                                chatId,
+                                                gifUrl: gif.url,
+                                                replyTo: replyingTo?._id || null,
+                                            });
+                                            addMessage(data.message);
+                                            clearReplyingTo();
+                                        } catch {
+                                            // Fallback: send as text with link
+                                            sendMessage({ chatId, text: gif.url, replyTo: replyingTo?._id || null, tempId: Date.now().toString() });
+                                            clearReplyingTo();
+                                        } finally { setIsSending(false); }
+                                    }}
+                                >
+                                    <img src={gif.preview} alt="GIF" loading="lazy" />
+                                </button>
+                            ))}
+                            {gifResults.length === 0 && !isLoadingGifs && (
+                                <p className="col-span-2 text-center text-sm opacity-40 py-4">No GIFs found. Try a different search.</p>
+                            )}
+                        </div>
+                    )}
+                    <p className="text-[10px] opacity-25 text-center mt-1">Powered by Tenor</p>
                 </div>
             )}
 
@@ -828,8 +947,10 @@ export default function MessageInput({
                     </div>
                     <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
                         <button
-                            onClick={() => handleUnavailableFeature('GIF picker coming soon')}
-                            className="badge-pill hover:opacity-100 opacity-70 transition-opacity whitespace-nowrap"
+                            onClick={() => { setShowGif(v => !v); setShowEmoji(false); }}
+                            className={`badge-pill hover:opacity-100 transition-opacity whitespace-nowrap ${showGif ? 'opacity-100 !border-primary-400/20' : 'opacity-70'}`}
+                            style={showGif ? { background: 'rgba(124,109,255,0.2)', color: 'rgb(196,181,255)' } : undefined}
+                            disabled={composerDisabled}
                         >
                             <Sparkles className="w-3.5 h-3.5" />
                             GIF
@@ -856,14 +977,15 @@ export default function MessageInput({
                             <CalendarDays className="w-3.5 h-3.5" />
                             Later
                         </button>
-                        {media && ['image', 'video'].includes(mediaType) && (
+                        {media && ['image', 'video', 'audio'].includes(mediaType) && (
                             <button
                                 onClick={() => setViewOnceEnabled((current) => !current)}
-                                className={`badge-pill hover:opacity-100 transition-opacity whitespace-nowrap ${viewOnceEnabled ? 'opacity-100 bg-primary-500/15 text-primary-200 border-primary-400/20' : 'opacity-70'}`}
+                                className={`badge-pill hover:opacity-100 transition-opacity whitespace-nowrap ${viewOnceEnabled ? 'opacity-100 !border-primary-400/20' : 'opacity-70'}`}
+                                style={viewOnceEnabled ? { background: 'rgba(124,109,255,0.2)', color: 'rgb(196,181,255)' } : undefined}
                                 disabled={composerDisabled || isRecording || isSending}
                             >
                                 <EyeOff className="w-3.5 h-3.5" />
-                                {viewOnceEnabled ? 'View once on' : 'View once'}
+                                {viewOnceEnabled ? 'View once ✓' : 'View once'}
                             </button>
                         )}
                     </div>

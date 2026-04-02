@@ -135,9 +135,9 @@ h1, h2, h3, h4, h5, h6 {
     border-color: rgba(210,218,255,0.85);
   }
 
-  /* Surface Muted */
+  /* Surface Muted — NO border-radius here; set it inline where needed */
   .surface-muted {
-    @apply rounded-[20px] border;
+    @apply border;
   }
   html.dark .surface-muted {
     background: var(--surface-muted-dark);
@@ -146,6 +146,21 @@ h1, h2, h3, h4, h5, h6 {
   html:not(.dark) .surface-muted {
     background: var(--surface-muted-light);
     border-color: rgba(200,210,245,0.6);
+  }
+
+  /* Glass Card Dark (legacy compat) */
+  .glass-card-dark {
+    @apply rounded-[18px] border;
+    backdrop-filter: blur(22px) saturate(180%);
+    -webkit-backdrop-filter: blur(22px) saturate(180%);
+  }
+  html.dark .glass-card-dark {
+    background: rgba(12,15,28,0.72);
+    border-color: rgba(255,255,255,0.08);
+  }
+  html:not(.dark) .glass-card-dark {
+    background: rgba(240,242,255,0.82);
+    border-color: rgba(200,210,245,0.5);
   }
 
   /* ─── Message Bubbles ─── */
@@ -327,7 +342,7 @@ h1, h2, h3, h4, h5, h6 {
 
   /* ─── Send Button ─── */
   .send-button {
-    @apply flex items-center justify-center flex-shrink-0 text-white transition-all duration-250;
+    @apply flex items-center justify-center flex-shrink-0 text-white transition-all duration-200;
     width: 44px;
     height: 44px;
     border-radius: 16px;
@@ -543,3 +558,34 @@ html:not(.dark) .otp-input {
 .waveform-bar:nth-child(6) { height: 12px; animation-delay: 0.5s; }
 .waveform-bar:nth-child(7) { height: 22px; animation-delay: 0.15s; }
 .waveform-bar:nth-child(8) { height: 14px; animation-delay: 0.25s; }
+
+/* ─── Slide-in from right (ChatDetailsDrawer) ─────── */
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(100%); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.animate-slide-in-right { animation: slideInRight 0.3s cubic-bezier(0.32, 0, 0, 1) forwards; }
+
+/* ─── Bottom sheet slide up ──────────────────────── */
+@keyframes sheetUp {
+  from { opacity: 0; transform: translateY(100%); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-sheet-up { animation: sheetUp 0.28s cubic-bezier(0.32, 0, 0, 1) forwards; }
+
+/* ─── GIF Picker ─────────────────────────────────── */
+.gif-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+}
+.gif-item {
+  border-radius: 12px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform 0.18s ease, opacity 0.18s ease;
+  aspect-ratio: 16/9;
+  background: rgba(255,255,255,0.04);
+}
+.gif-item:hover { transform: scale(1.03); opacity: 0.9; }
+.gif-item img { width: 100%; height: 100%; object-fit: cover; }

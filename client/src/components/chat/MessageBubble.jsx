@@ -10,11 +10,13 @@ import useSocket from '../../hooks/useSocket';
 import useAuthStore from '../../store/useAuthStore';
 import useChatStore from '../../store/useChatStore';
 import useReminderStore from '../../store/useReminderStore';
+import useLongPress from '../../hooks/useLongPress';
 import { formatTime } from '../../utils/formatters';
 import { EMOJI_LIST } from '../../utils/constants';
 import AvatarFallback from '../ui/AvatarFallback';
 import ImagePreview from './ImagePreview';
 import ViewOnceMediaViewer from './ViewOnceMediaViewer';
+import MessageContextSheet from './MessageContextSheet';
 
 const sameId = (l, r) => String(l || '') === String(r || '');
 
@@ -53,13 +55,14 @@ function ReactionList({ reactions, onReact }) {
     ));
 }
 
-export default function MessageBubble({ message, isOwn, otherUser, showAvatar }) {
+export default function MessageBubble({ message, isOwn, otherUser, showAvatar, onOpenUserProfile }) {
     const formatDateTimeLocal = (d) => {
         const p = (v) => `${v}`.padStart(2, '0');
         return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
     };
 
     const [showReactions, setShowReactions] = useState(false);
+    const [showContextSheet, setShowContextSheet] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
     const [editText, setEditText] = useState(message.text);
     const [showImage, setShowImage] = useState(false);
@@ -74,6 +77,8 @@ export default function MessageBubble({ message, isOwn, otherUser, showAvatar })
     const [newCollectionColor, setNewCollectionColor] = useState('#7c6dff');
     const [customReminderAt, setCustomReminderAt] = useState(() => formatDateTimeLocal(new Date(Date.now() + 3600000)));
     const [viewOnceViewer, setViewOnceViewer] = useState(null);
+
+    const longPressHandlers = useLongPress(() => setShowContextSheet(true), 480);
 
     const { emitReaction, emitDeleteMessage, emitEditMessage } = useSocket();
     const { user } = useAuthStore();
@@ -167,17 +172,27 @@ export default function MessageBubble({ message, isOwn, otherUser, showAvatar })
     return (
         <>
             <div className={`flex mb-1 ${isOwn ? 'justify-end' : 'justify-start'} group animate-slide-up`}>
-                {/* Received avatar */}
+                {/* Received avatar — clickable → open profile */}
                 {!isOwn && showAvatar && (
-                    <div className="w-7 h-7 rounded-full overflow-hidden mr-2 mt-auto flex-shrink-0 ring-1 ring-white/10" title={sender.name}>
+                    <button
+                        type="button"
+                        className="w-7 h-7 rounded-full overflow-hidden mr-2 mt-auto flex-shrink-0 ring-1 ring-white/10 hover:ring-primary-400/40 transition-all"
+                        title={sender.name}
+                        onClick={() => onOpenUserProfile?.(sender)}
+                    >
                         {sender.avatar
                             ? <img src={sender.avatar} alt={sender.name} className="w-full h-full object-cover" />
                             : <AvatarFallback name={sender.name} className="text-[9px]" />}
-                    </div>
+                    </button>
                 )}
                 {!isOwn && !showAvatar && <div className="w-7 mr-2 flex-shrink-0" />}
 
-                <div className={`max-w-[82%] sm:max-w-[72%] lg:max-w-[65%] relative min-w-0 flex flex-col ${isOwn ? 'items-end' : 'items-start'}`}>
+                {/* Long-press wrapper */}
+                <div
+                    className={`max-w-[82%] sm:max-w-[72%] lg:max-w-[65%] relative min-w-0 flex flex-col ${isOwn ? 'items-end' : 'items-start'}`}
+                    {...longPressHandlers}
+                    onContextMenu={e => { e.preventDefault(); setShowContextSheet(true); }}
+                >
 
                     {/* ── Floating action pill — appears above bubble on hover ── */}
                     <div className={`absolute -top-9 ${isOwn ? 'right-0' : 'left-0'} opacity-0 group-hover:opacity-100 transition-all duration-200 z-20 pointer-events-none group-hover:pointer-events-auto`}>
@@ -211,15 +226,18 @@ export default function MessageBubble({ message, isOwn, otherUser, showAvatar })
                         </div>
                     </div>
 
-                    {/* Reaction picker */}
+                    {/* Reaction picker — scrollable for large emoji list */}
                     {showReactions && (
-                        <div className={`absolute -top-12 ${isOwn ? 'right-0' : 'left-0'} glass-card px-2 py-1.5 flex gap-0.5 z-30 animate-bounce-in`}>
-                            {EMOJI_LIST.map(emoji => (
-                                <button key={emoji} onClick={() => handleReaction(emoji)}
-                                    className="p-1.5 rounded-xl hover:bg-white/10 transition-transform hover:scale-125 text-lg leading-none">
-                                    {emoji}
-                                </button>
-                            ))}
+                        <div className={`absolute -top-14 ${isOwn ? 'right-0' : 'left-0'} glass-card z-30 animate-bounce-in`}
+                            style={{ width: 'min(320px, 90vw)' }}>
+                            <div className="flex flex-wrap gap-0.5 p-2 max-h-36 overflow-y-auto">
+                                {EMOJI_LIST.map(emoji => (
+                                    <button key={emoji} onClick={() => handleReaction(emoji)}
+                                        className="p-1.5 rounded-xl hover:bg-white/10 transition-transform hover:scale-125 text-lg leading-none">
+                                        {emoji}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
                     )}
 
@@ -508,6 +526,27 @@ export default function MessageBubble({ message, isOwn, otherUser, showAvatar })
             {viewOnceViewer && (
                 <ViewOnceMediaViewer mediaUrl={viewOnceViewer.mediaUrl} type={viewOnceViewer.type}
                     durationSeconds={viewOnceViewer.durationSeconds} onClose={() => setViewOnceViewer(null)} />
+            )}
+
+            {/* Long-press / right-click context bottom sheet */}
+            {showContextSheet && (
+                <MessageContextSheet
+                    message={message}
+                    isOwn={isOwn}
+                    isStarred={isStarred}
+                    isPinned={isPinnedMessage}
+                    onClose={() => setShowContextSheet(false)}
+                    onReact={handleReaction}
+                    onReply={() => setReplyingTo(message)}
+                    onStar={() => toggleStarMessage(message._id)}
+                    onForward={() => setShowForwardModal(true)}
+                    onPin={() => togglePinMessage(message._id)}
+                    onBookmark={() => setShowBookmarkModal(true)}
+                    onRemind={() => setShowReminderModal(true)}
+                    onEdit={() => { setIsEditing(true); setEditText(message.text); setShowContextSheet(false); }}
+                    onDeleteMe={() => handleDelete('me')}
+                    onDeleteAll={() => handleDelete('everyone')}
+                />
             )}
         </>
     );
