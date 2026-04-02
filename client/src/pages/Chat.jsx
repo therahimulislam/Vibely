@@ -47,11 +47,15 @@ export default function Chat() {
     };
 
     return (
-        <div className="h-[100dvh] min-h-screen flex overflow-hidden relative">
-            <div className="absolute inset-0 pointer-events-none">
-                <div className="absolute -top-24 left-[8%] w-72 h-72 rounded-full blur-[110px] opacity-20 bg-[#6f6bff]" />
-                <div className="absolute top-[18%] right-[10%] w-80 h-80 rounded-full blur-[120px] opacity-10 bg-cyan-400" />
-                <div className="absolute bottom-[-8%] left-[28%] w-72 h-72 rounded-full blur-[120px] opacity-10 bg-fuchsia-500" />
+        <div className="h-[100dvh] flex overflow-hidden relative">
+            {/* Animated aurora background orbs */}
+            <div className="absolute inset-0 pointer-events-none overflow-hidden">
+                <div className="absolute -top-32 -left-16 w-[480px] h-[480px] rounded-full blur-[120px] animate-breathe bg-[#7c6dff]"
+                    style={{ animationDelay: '0s', opacity: 0.15 }} />
+                <div className="absolute top-[20%] right-[-5%] w-[400px] h-[400px] rounded-full blur-[130px] animate-breathe bg-[#06b6d4]"
+                    style={{ animationDelay: '2.5s', opacity: 0.10 }} />
+                <div className="absolute bottom-[-10%] left-[30%] w-[380px] h-[380px] rounded-full blur-[130px] animate-breathe bg-[#9d4edd]"
+                    style={{ animationDelay: '5s', opacity: 0.10 }} />
             </div>
             {/* Sidebar */}
             <div className={`${showSidebar ? 'flex' : 'hidden'} md:flex w-full md:w-[360px] lg:w-[420px] xl:w-[448px] flex-shrink-0 min-w-0 min-h-0 p-1.5 sm:p-2 md:p-3 z-10`}>

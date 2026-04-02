@@ -401,7 +401,7 @@ export default function Sidebar({ onProfileClick }) {
                 <div className="flex items-center gap-3 min-w-0">
                     <div
                         onClick={onProfileClick}
-                        className="w-11 h-11 rounded-full overflow-hidden cursor-pointer ring-2 ring-primary-500/30 hover:ring-primary-500/60 transition-all shadow-[0_10px_24px_rgba(111,107,255,0.18)]"
+                        className="w-11 h-11 rounded-full overflow-hidden cursor-pointer ring-[2.5px] ring-primary-500/40 hover:ring-primary-500/70 transition-all shadow-[0_8px_24px_rgba(124,109,255,0.22)]"
                     >
                         {user?.avatar ? (
                             <img src={user.avatar} alt={user.name} className="w-full h-full object-cover" />
@@ -410,8 +410,11 @@ export default function Sidebar({ onProfileClick }) {
                         )}
                     </div>
                     <div className="min-w-0">
-                        <h2 className="font-semibold text-sm truncate">{user?.name}</h2>
-                        <p className="text-xs opacity-45 truncate">Personal workspace</p>
+                        <h2 className="font-bold text-sm truncate tracking-tight">{user?.name}</h2>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" style={{ boxShadow: '0 0 5px rgba(34,197,94,0.6)' }} />
+                            <p className="text-[11px] opacity-45 truncate">Personal workspace</p>
+                        </div>
                     </div>
                 </div>
 
@@ -421,22 +424,17 @@ export default function Sidebar({ onProfileClick }) {
                         className="icon-button !w-10 !h-10 sm:!w-[42px] sm:!h-[42px]"
                         title="Settings"
                     >
-                        <Settings className="w-4 h-4 opacity-65" />
+                        <Settings className="w-4 h-4 opacity-60" />
                     </button>
                     <ThemeToggle />
                     <button
                         onClick={() => {
                             const shouldOpen = !(showNewChat || showNewGroup || showJoinGroup);
-                            if (!shouldOpen) {
-                                closeCreationPanels();
-                                return;
-                            }
-                            setShowNewChat(true);
-                            setShowNewGroup(false);
-                            setShowJoinGroup(false);
+                            if (!shouldOpen) { closeCreationPanels(); return; }
+                            setShowNewChat(true); setShowNewGroup(false); setShowJoinGroup(false);
                         }}
-                        className="icon-button relative group !w-10 !h-10 sm:!w-[42px] sm:!h-[42px]"
-                        title="New Chat / Group"
+                        className="icon-button !w-10 !h-10 sm:!w-[42px] sm:!h-[42px]"
+                        title="New Chat"
                     >
                         <Plus className="w-4 h-4 opacity-65" />
                     </button>
@@ -445,7 +443,7 @@ export default function Sidebar({ onProfileClick }) {
                         className="icon-button hover:!border-red-400/20 hover:!bg-red-500/10 !w-10 !h-10 sm:!w-[42px] sm:!h-[42px]"
                         title="Logout"
                     >
-                        <LogOut className="w-4 h-4 opacity-60 hover:text-red-400" />
+                        <LogOut className="w-4 h-4 opacity-55 hover:text-red-400" />
                     </button>
                 </div>
             </div>
@@ -470,7 +468,7 @@ export default function Sidebar({ onProfileClick }) {
                             className="input-glass pl-10 py-2.5 text-sm"
                         />
                     </div>
-                    <div className="flex gap-2 mt-3 overflow-x-auto pb-1 no-scrollbar">
+                    <div className="flex gap-1.5 mt-3 overflow-x-auto pb-1 no-scrollbar">
                         {[
                             ['all', 'All'],
                             ['unread', 'Unread'],
@@ -481,8 +479,8 @@ export default function Sidebar({ onProfileClick }) {
                             <button
                                 key={value}
                                 onClick={() => setChatFilter(value)}
-                                className={`badge-pill whitespace-nowrap transition-all ${chatFilter === value ? 'text-white shadow-[0_10px_22px_rgba(111,107,255,0.24)]' : ''}`}
-                                style={chatFilter === value ? { background: 'var(--gradient-primary)' } : undefined}
+                                className={`badge-pill whitespace-nowrap transition-all text-[11px] font-semibold ${chatFilter === value ? '!text-white shadow-[0_8px_20px_rgba(124,109,255,0.30)]' : 'hover:opacity-80'}`}
+                                style={chatFilter === value ? { background: 'var(--gradient-primary)', borderColor: 'transparent' } : undefined}
                             >
                                 {label}
                             </button>

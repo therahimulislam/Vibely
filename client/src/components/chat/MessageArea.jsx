@@ -42,6 +42,7 @@ export default function MessageArea({ onBack, onProfileClick }) {
     const { startCall } = useWebRTC();
     const messagesContainerRef = useRef(null);
     const messageRefs = useRef({});
+    const messageInputWrapperRef = useRef(null);
     const previousChatIdRef = useRef(null);
     const previousMessagesLengthRef = useRef(0);
     const previousScrollHeightRef = useRef(0);
@@ -55,6 +56,7 @@ export default function MessageArea({ onBack, onProfileClick }) {
     const [searchDateFrom, setSearchDateFrom] = useState('');
     const [searchDateTo, setSearchDateTo] = useState('');
     const [highlightedMessageId, setHighlightedMessageId] = useState(null);
+    const [showScrollFab, setShowScrollFab] = useState(false);
 
     // Defensive check
     if (!user || !activeChat) return null;
@@ -273,6 +275,22 @@ export default function MessageArea({ onBack, onProfileClick }) {
         }
     }, [isLoadingMessages, messages.length]);
 
+    // When the input area grows (multi-line, reply previews, etc.), keep the
+    // messages list stuck to the bottom so the latest message stays visible.
+    useEffect(() => {
+        const wrapper = messageInputWrapperRef.current;
+        if (!wrapper) return undefined;
+
+        const observer = new ResizeObserver(() => {
+            if (shouldStickToBottomRef.current) {
+                scrollToBottom('auto');
+            }
+        });
+
+        observer.observe(wrapper);
+        return () => observer.disconnect();
+    }, [scrollToBottom]);
+
     // Mark messages as seen when chat becomes active
     useEffect(() => {
         if (activeChat) {
@@ -320,6 +338,7 @@ export default function MessageArea({ onBack, onProfileClick }) {
         const container = e.currentTarget;
         const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
         shouldStickToBottomRef.current = distanceFromBottom < 120;
+        setShowScrollFab(distanceFromBottom > 300);
 
         if (container.scrollTop < 50) {
             requestOlderMessages();
@@ -361,14 +380,16 @@ export default function MessageArea({ onBack, onProfileClick }) {
                         onClick={openChatDetails}
                         className="min-w-0 flex-1 flex items-center gap-3 rounded-2xl px-1.5 py-1.5 -ml-1.5 text-left transition-colors hover:bg-white/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/40"
                     >
-                        <div className="w-11 h-11 rounded-full overflow-hidden cursor-pointer flex-shrink-0 ring-1 ring-white/10">
+                        <div className={`w-11 h-11 rounded-full overflow-hidden cursor-pointer flex-shrink-0 ${
+                            isOnline ? 'ring-[2.5px] ring-emerald-400/70 animate-pulse-online' : 'ring-1 ring-white/10'
+                        }`}>
                             {chatInfo.avatar ? (
                                 <img src={chatInfo.avatar} alt={chatInfo.name} className="w-full h-full object-cover" />
                             ) : (
                                 <AvatarFallback
                                     name={chatInfo.name}
                                     className="text-sm"
-                                    variant={chatInfo.isGroup ? 'group' : 'person'}
+                                    variant={chatInfo.isGroup ? 'group' : chatInfo.isSavedMessages ? 'saved' : 'person'}
                                     icon={chatInfo.isSavedMessages ? <Bookmark className="w-5 h-5" /> : chatInfo.isGroup ? <Users className="w-5 h-5" /> : null}
                                 />
                             )}
@@ -681,7 +702,8 @@ export default function MessageArea({ onBack, onProfileClick }) {
             <div
                 ref={messagesContainerRef}
                 onScroll={handleScroll}
-                className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-5 py-4 bg-[radial-gradient(circle_at_top,_rgba(111,107,255,0.08),_transparent_24%)]"
+                className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain px-3 sm:px-5 py-4 bg-[radial-gradient(ellipse_at_top,_rgba(124,109,255,0.07),_transparent_55%)]"
+                style={{ scrollbarGutter: 'stable' }}
             >
                 {isPendingRequest && !isRequester && (
                     <div className="mb-4 glass-card p-4 rounded-2xl border border-primary-500/20">
@@ -776,16 +798,32 @@ export default function MessageArea({ onBack, onProfileClick }) {
                 {isTyping && <TypingIndicator />}
             </div>
 
+            {/* Scroll-to-bottom FAB */}
+            {showScrollFab && (
+                <button
+                    onClick={() => { scrollToBottom('smooth'); setShowScrollFab(false); }}
+                    className="absolute bottom-[100px] right-4 sm:right-6 z-20 w-10 h-10 rounded-full text-white flex items-center justify-center shadow-[0_8px_24px_rgba(124,109,255,0.40)] animate-fab-in hover:scale-110 active:scale-95 transition-transform"
+                    style={{ background: 'var(--gradient-primary)' }}
+                    title="Scroll to bottom"
+                >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                    </svg>
+                </button>
+            )}
+
             {/* Message Input */}
-            <MessageInput
-                chatId={activeChat._id}
-                recipientId={isSavedMessagesChat ? null : otherUser?._id}
-                isGroup={chatInfo.isGroup}
-                isGroupAdmin={isCurrentUserGroupAdmin}
-                groupSettings={groupSettings}
-                disappearingMessages={disappearingMessages}
-                disabled={isPendingRequest && !isRequester}
-            />
+            <div ref={messageInputWrapperRef} className="flex-shrink-0">
+                <MessageInput
+                    chatId={activeChat._id}
+                    recipientId={isSavedMessagesChat ? null : otherUser?._id}
+                    isGroup={chatInfo.isGroup}
+                    isGroupAdmin={isCurrentUserGroupAdmin}
+                    groupSettings={groupSettings}
+                    disappearingMessages={disappearingMessages}
+                    disabled={isPendingRequest && !isRequester}
+                />
+            </div>
         </div>
     );
 }

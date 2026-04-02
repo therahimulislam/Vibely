@@ -1,7 +1,7 @@
 // client/src/components/chat/MessageInput.jsx
 // Message input with emoji picker, image upload, and floating send button
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useLayoutEffect } from 'react';
 import { Send, Smile, Image, X, Paperclip, FileText, BarChart3, Plus, Minus, Mic, Sparkles, Reply, CalendarDays, Clock3, Trash2, Edit3, EyeOff } from 'lucide-react';
 import useSocket from '../../hooks/useSocket';
 import useChatStore from '../../store/useChatStore';
@@ -141,6 +141,15 @@ export default function MessageInput({
 
         return () => window.clearTimeout(timer);
     }, [chatId, text, savedDraftText, persistDraft]);
+
+    // Auto-resize textarea based on content
+    useLayoutEffect(() => {
+        const el = inputRef.current;
+        if (!el) return;
+        el.style.height = 'auto';
+        const maxHeight = 128; // max-h-32 = 8rem = 128px
+        el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
+    }, [text, chatId]);
 
     useEffect(() => () => {
         if (recordingTimerRef.current) {
@@ -465,7 +474,7 @@ export default function MessageInput({
     const handleUnavailableFeature = (label) => toast(label);
 
     return (
-        <div className="px-3 sm:px-5 py-3 sm:py-4 flex-shrink-0 border-t border-white/5">
+        <div className="px-3 sm:px-4 py-3 flex-shrink-0 border-t border-white/5">
             {(isLoadingScheduledMessages || scheduledMessages.length > 0) && (
                 <div className="mb-3 glass-card rounded-2xl px-4 py-3 animate-slide-up">
                     <div className="flex items-center justify-between gap-3 mb-3">
@@ -795,7 +804,7 @@ export default function MessageInput({
             )}
 
             {/* Input row */}
-            <div className="surface-muted p-2.5 sm:p-3">
+            <div className="surface-muted !rounded-[22px] p-2.5 sm:p-3">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
                     <div className="flex items-center gap-2 flex-wrap">
                         <span className="badge-pill">Messages</span>
@@ -954,26 +963,25 @@ export default function MessageInput({
                                     : 'Write a message...'
                         }
                         rows={1}
-                        className="input-glass py-2.5 sm:py-3 text-sm resize-none max-h-32 min-h-[44px] sm:min-h-[48px]"
-                        style={{ height: 'auto', overflow: text.split('\n').length > 3 ? 'auto' : 'hidden' }}
+                        className="input-glass py-2.5 sm:py-3 text-sm resize-none max-h-32 min-h-[44px] sm:min-h-[48px] overflow-y-auto"
+                        style={{ height: 'auto' }}
                         disabled={composerDisabled || isRecording}
                     />
                 </div>
 
-                {/* Send button (floating) */}
+                {/* Send button */}
                 <button
                     onClick={handleSend}
                     disabled={composerDisabled || isSending || isRecording || (!text.trim() && !media)}
-                    className="p-3 sm:p-3.5 rounded-[18px] sm:rounded-[20px] text-white transition-all duration-300 disabled:opacity-30 disabled:cursor-not-allowed flex-shrink-0 hover:scale-105 active:scale-95"
-                    style={{
-                        background: text.trim() || media ? 'var(--gradient-primary)' : 'rgba(124, 92, 252, 0.2)',
-                        boxShadow: text.trim() || media ? '0 14px 28px rgba(111, 107, 255, 0.24)' : 'none',
-                    }}
+                    className="send-button flex-shrink-0"
                 >
                     {isSending ? (
-                        <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin block" />
+                        <span className="w-4.5 h-4.5 border-2 border-white/30 border-t-white rounded-full animate-spin block" style={{width:'18px',height:'18px'}} />
                     ) : (
-                        <Send className="w-5 h-5" />
+                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                            <line x1="22" y1="2" x2="11" y2="13" />
+                            <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                        </svg>
                     )}
                 </button>
             </div>

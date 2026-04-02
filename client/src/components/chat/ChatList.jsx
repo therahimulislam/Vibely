@@ -163,6 +163,7 @@ export default function ChatList({ filterMode = 'all' }) {
                 folderLabel={chatFolder?.name || ''}
                 folderColor={chatFolder?.color || ''}
                 draftText={draftText}
+                currentUserId={user?._id}
                 onClick={() => setActiveChat(chat)}
             />
         );
