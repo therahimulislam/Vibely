@@ -54,7 +54,7 @@ export default function Chat() {
                 <div className="absolute bottom-[-8%] left-[28%] w-72 h-72 rounded-full blur-[120px] opacity-10 bg-fuchsia-500" />
             </div>
             {/* Sidebar */}
-            <div className={`${showSidebar ? 'flex' : 'hidden'} md:flex w-full md:w-[360px] lg:w-[420px] xl:w-[448px] flex-shrink-0 min-w-0 p-1.5 sm:p-2 md:p-3 z-10`}>
+            <div className={`${showSidebar ? 'flex' : 'hidden'} md:flex w-full md:w-[360px] lg:w-[420px] xl:w-[448px] flex-shrink-0 min-w-0 min-h-0 p-1.5 sm:p-2 md:p-3 z-10`}>
                 <ErrorBoundary>
                     <Sidebar onProfileClick={() => setProfileView({ mode: 'self' })} />
                 </ErrorBoundary>
@@ -63,7 +63,7 @@ export default function Chat() {
 
 
             {/* Main Chat Area */}
-            <div className={`${!showSidebar || activeChat ? 'flex' : 'hidden'} md:flex flex-1 flex-col min-w-0 p-1.5 sm:p-2 md:p-3 md:pl-0 z-10`}>
+            <div className={`${!showSidebar || activeChat ? 'flex' : 'hidden'} md:flex flex-1 flex-col min-w-0 min-h-0 p-1.5 sm:p-2 md:p-3 md:pl-0 z-10`}>
                 {activeChat ? (
                     <ErrorBoundary>
                         <MessageArea

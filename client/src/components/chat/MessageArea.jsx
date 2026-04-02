@@ -1,7 +1,7 @@
 // client/src/components/chat/MessageArea.jsx
 // Main chat message area with header, messages, and input
 
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useRef, useCallback, useState, useLayoutEffect } from 'react';
 import { ArrowLeft, Phone, Video, MoreVertical, Pin, Trash2, Search, Users, UserPlus, Check, X as CloseIcon, UserRoundMinus, Archive, ArchiveRestore, Bookmark, Image as ImageIcon, FileText, Mic, Link2, Filter, Clock3, Shield } from 'lucide-react';
 import useChatStore from '../../store/useChatStore';
 import useAuthStore from '../../store/useAuthStore';
@@ -40,9 +40,13 @@ export default function MessageArea({ onBack, onProfileClick }) {
     const { fetchStatuses } = useStatusStore();
     const { emitMessageSeen } = useSocket();
     const { startCall } = useWebRTC();
-    const messagesEndRef = useRef(null);
     const messagesContainerRef = useRef(null);
     const messageRefs = useRef({});
+    const previousChatIdRef = useRef(null);
+    const previousMessagesLengthRef = useRef(0);
+    const previousScrollHeightRef = useRef(0);
+    const loadingOlderRef = useRef(false);
+    const shouldStickToBottomRef = useRef(true);
     const [showMenu, setShowMenu] = useState(false);
     const [searchMessages, setSearchMessages] = useState('');
     const [showSearch, setShowSearch] = useState(false);
@@ -197,12 +201,77 @@ export default function MessageArea({ onBack, onProfileClick }) {
         }, 2200);
     };
 
-    // Scroll to bottom on new messages
-    useEffect(() => {
-        if (messagesEndRef.current) {
-            messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    const scrollToBottom = useCallback((behavior = 'smooth') => {
+        const container = messagesContainerRef.current;
+        if (!container) return;
+
+        container.scrollTo({
+            top: container.scrollHeight,
+            behavior,
+        });
+    }, []);
+
+    const requestOlderMessages = useCallback(() => {
+        const container = messagesContainerRef.current;
+        if (!container || !hasMoreMessages || isLoadingMessages || loadingOlderRef.current) return;
+
+        previousScrollHeightRef.current = container.scrollHeight;
+        loadingOlderRef.current = true;
+        loadMoreMessages();
+    }, [hasMoreMessages, isLoadingMessages, loadMoreMessages]);
+
+    const latestMessage = messages[messages.length - 1];
+    const latestMessageId = latestMessage?._id || null;
+    const latestMessageSenderId = latestMessage?.senderId?._id || latestMessage?.senderId || null;
+
+    // Keep the conversation stable when older messages load, but still follow live sending near the bottom.
+    useLayoutEffect(() => {
+        const container = messagesContainerRef.current;
+        if (!container || !activeChat?._id) return;
+
+        const currentChatId = activeChat._id;
+        const previousChatId = previousChatIdRef.current;
+        const chatChanged = previousChatId !== currentChatId;
+
+        if (chatChanged) {
+            previousChatIdRef.current = currentChatId;
+            previousMessagesLengthRef.current = messages.length;
+            scrollToBottom('auto');
+            return;
         }
-    }, [messages.length]);
+
+        if (loadingOlderRef.current) {
+            const heightDelta = container.scrollHeight - previousScrollHeightRef.current;
+            container.scrollTop += heightDelta;
+            loadingOlderRef.current = false;
+            previousScrollHeightRef.current = 0;
+            previousMessagesLengthRef.current = messages.length;
+            return;
+        }
+
+        if (messages.length !== previousMessagesLengthRef.current) {
+            const sentByCurrentUser = `${latestMessageSenderId || ''}` === `${user._id}`;
+            if (shouldStickToBottomRef.current || sentByCurrentUser) {
+                scrollToBottom('smooth');
+            }
+        }
+
+        previousMessagesLengthRef.current = messages.length;
+    }, [activeChat?._id, messages.length, latestMessageId, latestMessageSenderId, scrollToBottom, user._id]);
+
+    useEffect(() => {
+        shouldStickToBottomRef.current = true;
+        loadingOlderRef.current = false;
+        previousScrollHeightRef.current = 0;
+        previousMessagesLengthRef.current = 0;
+    }, [activeChat?._id]);
+
+    useEffect(() => {
+        if (!isLoadingMessages && loadingOlderRef.current) {
+            loadingOlderRef.current = false;
+            previousScrollHeightRef.current = 0;
+        }
+    }, [isLoadingMessages, messages.length]);
 
     // Mark messages as seen when chat becomes active
     useEffect(() => {
@@ -248,10 +317,14 @@ export default function MessageArea({ onBack, onProfileClick }) {
 
     // Infinite scroll handler
     const handleScroll = useCallback((e) => {
-        if (e.target.scrollTop < 50 && hasMoreMessages && !isLoadingMessages) {
-            loadMoreMessages();
+        const container = e.currentTarget;
+        const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+        shouldStickToBottomRef.current = distanceFromBottom < 120;
+
+        if (container.scrollTop < 50) {
+            requestOlderMessages();
         }
-    }, [hasMoreMessages, isLoadingMessages]);
+    }, [requestOlderMessages]);
 
     // Group messages by date
     const groupedMessages = messages.reduce((groups, msg) => {
@@ -275,7 +348,7 @@ export default function MessageArea({ onBack, onProfileClick }) {
     if (!chatInfo.name && !otherUser && !activeChat.isGroup && !isSavedMessagesChat) return null;
 
     return (
-        <div className="flex-1 flex flex-col h-full relative surface-elevated overflow-hidden">
+        <div className="flex-1 min-h-0 flex flex-col h-full relative surface-elevated overflow-hidden">
             {/* Chat Header */}
             <div className="px-3.5 sm:px-5 py-3.5 sm:py-4 flex items-center justify-between flex-shrink-0 glass-panel border-b border-white/5 relative z-10 min-h-[68px] sm:min-h-[72px]">
                 <div className="flex items-center gap-3 min-w-0 flex-1 mr-2">
@@ -608,7 +681,7 @@ export default function MessageArea({ onBack, onProfileClick }) {
             <div
                 ref={messagesContainerRef}
                 onScroll={handleScroll}
-                className="flex-1 overflow-y-auto px-3 sm:px-5 py-4 bg-[radial-gradient(circle_at_top,_rgba(111,107,255,0.08),_transparent_24%)]"
+                className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-5 py-4 bg-[radial-gradient(circle_at_top,_rgba(111,107,255,0.08),_transparent_24%)]"
             >
                 {isPendingRequest && !isRequester && (
                     <div className="mb-4 glass-card p-4 rounded-2xl border border-primary-500/20">
@@ -652,7 +725,7 @@ export default function MessageArea({ onBack, onProfileClick }) {
                 {hasMoreMessages && (
                     <div className="flex justify-center py-2">
                         <button
-                            onClick={loadMoreMessages}
+                            onClick={requestOlderMessages}
                             className="text-xs text-primary-400 hover:text-primary-300 transition-colors"
                         >
                             Load older messages
@@ -701,8 +774,6 @@ export default function MessageArea({ onBack, onProfileClick }) {
                 ))}
 
                 {isTyping && <TypingIndicator />}
-
-                <div ref={messagesEndRef} />
             </div>
 
             {/* Message Input */}
