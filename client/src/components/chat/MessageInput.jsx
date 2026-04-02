@@ -8,6 +8,7 @@ import useChatStore from '../../store/useChatStore';
 import useAuthStore from '../../store/useAuthStore';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
+import { EMOJI_LIST } from '../../utils/constants';
 
 export default function MessageInput({
     chatId,
@@ -474,8 +475,6 @@ export default function MessageInput({
         }
     };
 
-    // Quick emoji insert
-    const quickEmojis = ['😊', '😂', '❤️', '👍', '🔥', '😮', '🎉', '🥺'];
     const handleUnavailableFeature = (label) => toast(label);
 
     return (
@@ -818,16 +817,22 @@ export default function MessageInput({
                 </div>
             )}
 
-            {/* Quick emoji bar */}
+            {/* Full emoji picker */}
             {showEmoji && (
                 <div className="mb-2 glass-card p-3 animate-slide-up">
-                    <div className="text-[10px] uppercase tracking-widest opacity-35 mb-2 px-1">Emoji</div>
-                    <div className="flex flex-wrap gap-0.5 max-h-28 overflow-y-auto">
-                        {quickEmojis.map((emoji) => (
+                    <div className="flex items-center justify-between mb-2 px-1">
+                        <div className="text-[10px] uppercase tracking-widest opacity-35">Emojis</div>
+                        <button onClick={() => setShowEmoji(false)} className="opacity-50 hover:opacity-100">
+                            <X className="w-3.5 h-3.5" />
+                        </button>
+                    </div>
+                    <div className="flex flex-wrap gap-1 max-h-40 overflow-y-auto no-scrollbar">
+                        {EMOJI_LIST.map((emoji) => (
                             <button
                                 key={emoji}
-                                onClick={() => { setText((t) => t + emoji); setShowEmoji(false); inputRef.current?.focus(); }}
-                                className="p-1.5 rounded-lg hover:bg-white/10 transition-transform hover:scale-125 text-xl"
+                                onClick={() => { setText((t) => t + emoji); inputRef.current?.focus(); }}
+                                className="p-1.5 rounded-lg hover:bg-white/10 transition-transform hover:scale-125 text-xl flex items-center justify-center w-9 h-9"
+                                title="Add emoji"
                             >
                                 {emoji}
                             </button>

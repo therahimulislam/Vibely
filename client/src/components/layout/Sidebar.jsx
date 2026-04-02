@@ -131,10 +131,21 @@ export default function Sidebar({ onProfileClick }) {
         setFolderDraftColor(activeFolder.color || '#6f6bff');
     }, [activeFolder?.folderId, activeFolder?.name, activeFolder?.color]);
 
-    // Search users for new chat
+    // Search users for new chat (Use recents from chats if empty)
     useEffect(() => {
         if (!userSearchQuery.trim()) {
-            setSearchUsers([]);
+            const recentUsersMap = new Map();
+            chats.forEach(chat => {
+                if (!chat.isGroup && !chat.isSavedMessages) {
+                    chat.participants?.forEach(p => {
+                        if (p && typeof p === 'object' && p._id && String(p._id) !== String(user?._id)) {
+                            recentUsersMap.set(p._id, p);
+                        }
+                    });
+                }
+            });
+            setSearchUsers(Array.from(recentUsersMap.values()));
+            setIsSearching(false);
             return;
         }
 
@@ -142,7 +153,7 @@ export default function Sidebar({ onProfileClick }) {
             setIsSearching(true);
             try {
                 const { data } = await api.get(`/users?search=${encodeURIComponent(userSearchQuery)}`);
-                setSearchUsers(data.users);
+                setSearchUsers(data.users || []);
             } catch (error) {
                 console.error('Search error:', error);
             } finally {
@@ -151,7 +162,7 @@ export default function Sidebar({ onProfileClick }) {
         }, 300);
 
         return () => clearTimeout(timer);
-    }, [userSearchQuery]);
+    }, [userSearchQuery, chats, user?._id]);
 
     useEffect(() => {
         if (!showJoinGroup) {
