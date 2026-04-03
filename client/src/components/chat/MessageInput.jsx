@@ -84,6 +84,10 @@ export default function MessageInput({
         if (hours === 2160) return '90d';
         return `${hours}h`;
     };
+    const isImageFile = (selectedFile) =>
+        !!selectedFile && (selectedFile.type.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(selectedFile.name));
+    const isVideoFile = (selectedFile) =>
+        !!selectedFile && (selectedFile.type.startsWith('video/') || /\.(mp4|mov|webm|m4v|avi|mkv)$/i.test(selectedFile.name));
     const persistDraft = useCallback(async (nextText) => {
         if (!chatId) return;
         try {
@@ -167,6 +171,12 @@ export default function MessageInput({
         recordingStreamRef.current?.getTracks?.().forEach((track) => track.stop());
     }, []);
 
+    useEffect(() => () => {
+        if (mediaPreview?.startsWith('blob:')) {
+            URL.revokeObjectURL(mediaPreview);
+        }
+    }, [mediaPreview]);
+
     // Handle typing indicator
     const handleTyping = useCallback(() => {
         if (composerDisabled) return;
@@ -195,26 +205,40 @@ export default function MessageInput({
             return;
         }
 
-        setMedia(file);
-
         if (isDocument) {
+            setMedia(file);
             setMediaType('document');
             setMediaPreview(file.name);
         } else {
             // Gallery mode (auto-detect)
-            if (file.type.startsWith('image/')) {
+            if (isImageFile(file)) {
+                setMedia(file);
                 setMediaType('image');
                 setMediaPreview(URL.createObjectURL(file));
-            } else if (file.type.startsWith('video/')) {
+            } else if (isVideoFile(file)) {
+                setMedia(file);
                 setMediaType('video');
                 setMediaPreview(URL.createObjectURL(file));
             } else {
                 // Fallback for non-image/video in gallery mode (should generally be filtered out by accept, but safety)
+                setMedia(file);
                 setMediaType('document');
                 setMediaPreview(file.name);
             }
         }
         setShowAttach(false);
+        e.target.value = '';
+    };
+
+    const clearSelectedMedia = () => {
+        setMedia(null);
+        setMediaPreview(null);
+        setMediaType('text');
+        setViewOnceEnabled(false);
+        setUploadProgress(0);
+        if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+        }
     };
 
     const formatRecordingTime = (seconds) => {
@@ -349,11 +373,7 @@ export default function MessageInput({
             }
 
             setText('');
-            setMedia(null);
-            setMediaPreview(null);
-            setMediaType('text');
-            setViewOnceEnabled(false);
-            setUploadProgress(0);
+            clearSelectedMedia();
             clearReplyingTo();
             inputRef.current?.focus();
             persistDraft('');
@@ -390,11 +410,7 @@ export default function MessageInput({
 
             await createScheduledMessage(formData);
             setText('');
-            setMedia(null);
-            setMediaPreview(null);
-            setMediaType('text');
-            setViewOnceEnabled(false);
-            setUploadProgress(0);
+            clearSelectedMedia();
             setShowScheduleComposer(false);
             setScheduledFor(getDefaultScheduleTime());
             clearReplyingTo();
@@ -725,16 +741,35 @@ export default function MessageInput({
             )}
 
             {mediaPreview && (
-                <div className="mb-3 relative inline-block animate-slide-up">
+                <div className="mb-3 glass-card rounded-3xl p-3 animate-slide-up">
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                        <div>
+                            <p className="text-[11px] uppercase tracking-[0.24em] opacity-35 mb-1">Attachment Preview</p>
+                            <h4 className="text-sm font-semibold">Ready to send</h4>
+                        </div>
+                        <button
+                            onClick={clearSelectedMedia}
+                            className="w-8 h-8 rounded-xl bg-red-500/90 hover:bg-red-500 flex items-center justify-center flex-shrink-0"
+                            title="Remove attachment"
+                        >
+                            <X className="w-3.5 h-3.5 text-white" />
+                        </button>
+                    </div>
+
                     {mediaType === 'video' ? (
-                        <video
-                            src={mediaPreview}
-                            className="h-32 rounded-xl object-cover border border-white/10"
-                            controls={false}
-                            autoPlay
-                            muted
-                            loop
-                        />
+                        <div className="space-y-3">
+                            <video
+                                src={mediaPreview}
+                                className="w-full max-h-64 rounded-2xl object-cover border border-white/10 bg-black/30"
+                                controls
+                                muted
+                                loop
+                            />
+                            <div className="flex items-center justify-between gap-3 text-xs opacity-60">
+                                <span className="truncate">{media?.name || 'Video attachment'}</span>
+                                <span>{media ? `${(media.size / 1024 / 1024).toFixed(2)} MB` : ''}</span>
+                            </div>
+                        </div>
                     ) : mediaType === 'audio' ? (
                         <div className="max-w-[min(100%,22rem)] px-4 py-3 rounded-2xl bg-white/10 border border-white/10 min-w-[16rem]">
                             <div className="flex items-center justify-between gap-3 mb-2">
@@ -759,11 +794,17 @@ export default function MessageInput({
                             </div>
                         </div>
                     ) : (
-                        <img
-                            src={mediaPreview}
-                            alt="Preview"
-                            className="h-32 rounded-xl object-cover border border-white/10"
-                        />
+                        <div className="space-y-3">
+                            <img
+                                src={mediaPreview}
+                                alt="Preview"
+                                className="w-full max-h-64 rounded-2xl object-cover border border-white/10 bg-black/20"
+                            />
+                            <div className="flex items-center justify-between gap-3 text-xs opacity-60">
+                                <span className="truncate">{media?.name || 'Photo attachment'}</span>
+                                <span>{media ? `${(media.size / 1024 / 1024).toFixed(2)} MB` : ''}</span>
+                            </div>
+                        </div>
                     )}
                     {/* View-once prominent toggle button (shown for image, video, audio) */}
                     {media && ['image', 'video', 'audio'].includes(mediaType) && (
@@ -798,14 +839,8 @@ export default function MessageInput({
                             </div>
                         </button>
                     )}
-                    <button
-                        onClick={() => { setMedia(null); setMediaPreview(null); setMediaType('text'); setViewOnceEnabled(false); }}
-                        className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-red-500 flex items-center justify-center z-10"
-                    >
-                        <X className="w-3 h-3 text-white" />
-                    </button>
                     {uploadProgress > 0 && uploadProgress < 100 && (
-                        <div className="absolute bottom-2 left-2 right-2">
+                        <div className="mt-3">
                             <div className="h-1 bg-white/20 rounded-full overflow-hidden">
                                 <div
                                     className="h-full rounded-full transition-all duration-300"

@@ -242,15 +242,18 @@ const useAuthStore = create((set, get) => ({
         }
     },
 
-    addContact: async (userId) => {
+    addContact: async (userId, preferredName = '') => {
         try {
-            await api.post(`/users/contacts/${userId}`);
+            const { data } = await api.post(`/users/contacts/${userId}`, { preferredName });
             set((state) => ({
                 user: {
                     ...state.user,
-                    contacts: Array.from(new Set([...(state.user?.contacts || []), userId])),
+                    ...data.user,
+                    contacts: data.user?.contacts || Array.from(new Set([...(state.user?.contacts || []), userId])),
+                    contactProfiles: data.user?.contactProfiles || state.user?.contactProfiles || [],
                 },
             }));
+            return data.contact;
         } catch (error) {
             throw new Error(error.response?.data?.error || 'Failed to add contact');
         }
@@ -258,11 +261,15 @@ const useAuthStore = create((set, get) => ({
 
     removeContact: async (userId) => {
         try {
-            await api.delete(`/users/contacts/${userId}`);
+            const { data } = await api.delete(`/users/contacts/${userId}`);
             set((state) => ({
                 user: {
                     ...state.user,
-                    contacts: (state.user?.contacts || []).filter((id) => id !== userId),
+                    ...data.user,
+                    contacts: (data.user?.contacts || state.user?.contacts || []).filter((id) => `${id}` !== `${userId}`),
+                    contactProfiles: (data.user?.contactProfiles || state.user?.contactProfiles || []).filter(
+                        (entry) => `${entry?.userId?._id || entry?.userId || ''}` !== `${userId}`
+                    ),
                 },
             }));
         } catch (error) {

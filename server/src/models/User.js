@@ -80,6 +80,27 @@ const chatDraftSchema = new mongoose.Schema(
     { _id: false }
 );
 
+const contactProfileSchema = new mongoose.Schema(
+    {
+        userId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            required: true,
+        },
+        preferredName: {
+            type: String,
+            trim: true,
+            maxlength: 60,
+            default: '',
+        },
+        createdAt: {
+            type: Date,
+            default: Date.now,
+        },
+    },
+    { _id: false }
+);
+
 const userSchema = new mongoose.Schema(
     {
         name: {
@@ -204,6 +225,10 @@ const userSchema = new mongoose.Schema(
                 ref: 'User',
             },
         ],
+        contactProfiles: {
+            type: [contactProfileSchema],
+            default: [],
+        },
         sessions: [
             {
                 refreshToken: String,

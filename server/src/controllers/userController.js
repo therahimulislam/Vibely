@@ -8,6 +8,7 @@ const { uploadAvatar } = require('../services/cloudinaryService');
 const fs = require('fs');
 
 const sanitizeUsername = (value = '') => value.trim().toLowerCase();
+const escapeRegex = (value = '') => `${value}`.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const sanitizeUrl = (value = '') => {
     const trimmed = value.trim();
     if (!trimmed) return '';
@@ -16,6 +17,24 @@ const sanitizeUrl = (value = '') => {
 const sanitizeColor = (value = '') => {
     const trimmed = value.trim();
     return /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(trimmed) ? trimmed : '#6f6bff';
+};
+const sanitizePreferredName = (value = '', fallback = '') => {
+    const preferredName = `${value || ''}`.trim().slice(0, 60);
+    const fallbackName = `${fallback || ''}`.trim().slice(0, 60);
+    return preferredName || fallbackName;
+};
+const normalizeId = (value) => {
+    if (!value) return '';
+    if (typeof value === 'string') return value;
+    if (value._id) return value._id.toString();
+    if (value.userId) return normalizeId(value.userId);
+    return value.toString?.() || '';
+};
+const hasContact = (currentUser, targetUserId) =>
+    (currentUser?.contacts || []).some((entry) => normalizeId(entry) === `${targetUserId}`);
+const getPreferredContactName = (currentUser, targetUserId, fallbackName = '') => {
+    const profile = (currentUser?.contactProfiles || []).find((entry) => normalizeId(entry?.userId) === `${targetUserId}`);
+    return sanitizePreferredName(profile?.preferredName, fallbackName);
 };
 const normalizeFolderPayload = (folders = []) => folders
     .filter(Boolean)
@@ -64,7 +83,13 @@ const formatPublicUser = (user, currentUser) => ({
     },
     isOnline: user.isOnline,
     lastSeen: user.lastSeen,
-    isContact: currentUser.contacts?.some((contactId) => contactId.toString() === user._id.toString()) || false,
+    isContact: hasContact(currentUser, user._id),
+    preferredName: hasContact(currentUser, user._id)
+        ? getPreferredContactName(currentUser, user._id, user.name)
+        : '',
+    displayName: hasContact(currentUser, user._id)
+        ? getPreferredContactName(currentUser, user._id, user.name)
+        : user.name,
 });
 
 // GET /api/users - Search users
@@ -74,7 +99,14 @@ exports.getUsers = async (req, res) => {
         let query = { _id: { $ne: req.userId } };
 
         if (search) {
-            query.username = { $regex: `^${sanitizeUsername(search)}`, $options: 'i' };
+            const trimmedSearch = `${search}`.trim();
+            const escapedSearch = escapeRegex(trimmedSearch);
+            const normalizedUsername = sanitizeUsername(trimmedSearch);
+
+            query.$or = [
+                { username: { $regex: `^${escapeRegex(normalizedUsername)}`, $options: 'i' } },
+                { name: { $regex: escapedSearch, $options: 'i' } },
+            ];
         }
 
         const users = await User.find(query)
@@ -203,9 +235,19 @@ exports.addContact = async (req, res) => {
             return res.status(404).json({ error: 'User not found' });
         }
 
-        await User.findByIdAndUpdate(req.userId, { $addToSet: { contacts: contact._id } });
         const updatedUser = await User.findById(req.userId);
-        res.json({ contact: formatPublicUser(contact, updatedUser) });
+        updatedUser.contacts = Array.from(new Set([...(updatedUser.contacts || []).map((id) => id.toString()), contact._id.toString()]));
+
+        const filteredProfiles = (updatedUser.contactProfiles || []).filter((entry) => normalizeId(entry?.userId) !== contact._id.toString());
+        filteredProfiles.push({
+            userId: contact._id,
+            preferredName: sanitizePreferredName(req.body?.preferredName, contact.name),
+            createdAt: new Date(),
+        });
+        updatedUser.contactProfiles = filteredProfiles;
+
+        await updatedUser.save();
+        res.json({ contact: formatPublicUser(contact, updatedUser), user: updatedUser });
     } catch (error) {
         res.status(500).json({ error: 'Server error' });
     }
@@ -213,8 +255,11 @@ exports.addContact = async (req, res) => {
 
 exports.removeContact = async (req, res) => {
     try {
-        await User.findByIdAndUpdate(req.userId, { $pull: { contacts: req.params.id } });
-        res.json({ success: true });
+        const user = await User.findById(req.userId);
+        user.contacts = (user.contacts || []).filter((entry) => normalizeId(entry) !== req.params.id.toString());
+        user.contactProfiles = (user.contactProfiles || []).filter((entry) => normalizeId(entry?.userId) !== req.params.id.toString());
+        await user.save();
+        res.json({ success: true, user });
     } catch (error) {
         res.status(500).json({ error: 'Server error' });
     }

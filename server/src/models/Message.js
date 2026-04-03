@@ -24,6 +24,21 @@ const pollOptionSchema = new mongoose.Schema(
     { _id: false }
 );
 
+const seenBySchema = new mongoose.Schema(
+    {
+        userId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            required: true,
+        },
+        seenAt: {
+            type: Date,
+            default: Date.now,
+        },
+    },
+    { _id: false }
+);
+
 const messageSchema = new mongoose.Schema(
     {
         chatId: {
@@ -82,6 +97,10 @@ const messageSchema = new mongoose.Schema(
             enum: ['sent', 'delivered', 'seen'],
             default: 'sent',
         },
+        seenBy: {
+            type: [seenBySchema],
+            default: [],
+        },
         starredBy: [
             {
                 type: mongoose.Schema.Types.ObjectId,
@@ -97,6 +116,10 @@ const messageSchema = new mongoose.Schema(
         isEdited: {
             type: Boolean,
             default: false,
+        },
+        editedAt: {
+            type: Date,
+            default: null,
         },
         isDeleted: {
             type: Boolean,

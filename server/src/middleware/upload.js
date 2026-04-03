@@ -68,7 +68,7 @@ const storage = multer.diskStorage({
 });
 
 const getAllowedTypes = (req, file) => {
-    if (file.fieldname === 'avatar') return AVATAR_ALLOWED_TYPES;
+    if (file.fieldname === 'avatar' || file.fieldname === 'groupAvatar') return AVATAR_ALLOWED_TYPES;
     if (file.fieldname === 'media' && req.baseUrl === '/api/status') return STATUS_ALLOWED_TYPES;
     return MESSAGE_ALLOWED_TYPES;
 };

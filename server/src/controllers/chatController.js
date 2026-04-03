@@ -4,11 +4,17 @@
 const Chat = require('../models/Chat');
 const User = require('../models/User');
 const Message = require('../models/Message');
+const fs = require('fs');
+const { uploadAvatar } = require('../services/cloudinaryService');
 const { sanitizeMessageForViewer } = require('../utils/messageVisibility');
 const {
     normalizeGroupSettings,
     normalizeDisappearingMessages,
     ensureGroupAdmin,
+    isGroupAdmin,
+    getGroupOwnerId,
+    getGroupAdminIds,
+    syncGroupRoleState,
     getActiveInviteLinks,
 } = require('../utils/chatRules');
 const { randomUUID } = require('crypto');
@@ -21,7 +27,9 @@ const areMutualContacts = (user, otherUserId) =>
     user.contacts?.some((id) => id.toString() === otherUserId.toString());
 const chatPopulateQuery = [
     { path: 'participants', select: USER_PUBLIC_FIELDS },
+    { path: 'groupOwner', select: 'name username avatar' },
     { path: 'groupAdmin', select: 'name username avatar' },
+    { path: 'groupAdmins', select: 'name username avatar' },
     { path: 'requestedBy', select: 'name username avatar' },
     { path: 'inviteLinks.createdBy', select: 'name username avatar' },
     { path: 'pendingJoinRequests.userId', select: 'name username avatar' },
@@ -35,7 +43,9 @@ const populateChatQuery = (query) => chatPopulateQuery.reduce(
 const sanitizeChatForViewer = (chat, userId) => {
     const plain = typeof chat?.toObject === 'function' ? chat.toObject({ depopulate: false }) : chat;
     if (!plain) return plain;
-    const viewerIsAdmin = !!plain.isGroup && sameId(plain.groupAdmin?._id || plain.groupAdmin, userId);
+    const ownerId = getGroupOwnerId(plain);
+    const adminIds = getGroupAdminIds(plain);
+    const viewerIsAdmin = !!plain.isGroup && isGroupAdmin(plain, userId);
     const now = Date.now();
     const lastMessage = plain.lastMessage?.expiresAt && new Date(plain.lastMessage.expiresAt).getTime() <= now
         ? null
@@ -45,6 +55,12 @@ const sanitizeChatForViewer = (chat, userId) => {
 
     return {
         ...plain,
+        groupOwner: plain.groupOwner || plain.groupAdmin || null,
+        groupAdmin: plain.groupOwner || plain.groupAdmin || null,
+        groupAdmins: adminIds.map((adminId) => (
+            (plain.groupAdmins || []).find((entry) => sameId(entry?._id || entry, adminId))
+            || (sameId(plain.groupOwner?._id || plain.groupOwner, adminId) ? (plain.groupOwner || plain.groupAdmin) : adminId)
+        )),
         lastMessage,
         inviteLinks: viewerIsAdmin ? getActiveInviteLinks(plain) : [],
         pendingJoinRequests: viewerIsAdmin ? (plain.pendingJoinRequests || []) : [],
@@ -60,8 +76,16 @@ const buildInviteUrl = (code) => {
     return `${baseUrl.replace(/\/$/, '')}/join/${code}`;
 };
 
+const cleanupTempFile = (filePath) => {
+    if (filePath) {
+        fs.unlink(filePath, () => { });
+    }
+};
+
 const findChatByInviteCode = async (code) => findChatByInviteCode.baseQuery(code)
+    .populate('groupOwner', 'name username avatar')
     .populate('groupAdmin', 'name username avatar')
+    .populate('groupAdmins', 'name username avatar')
     .populate('participants', USER_PUBLIC_FIELDS)
     .populate('pendingJoinRequests.userId', 'name username avatar');
 
@@ -91,16 +115,13 @@ const ensureChatParticipant = async (chatId, userId) => {
 // GET /api/chats - Get all chats for current user
 exports.getChats = async (req, res) => {
     try {
-        const chats = await Chat.find({
-            participants: req.userId,
-            deletedBy: { $ne: req.userId },
-            requestStatus: { $ne: 'rejected' },
-        })
-            .populate('participants', USER_PUBLIC_FIELDS)
-            .populate('groupAdmin', 'name username avatar')
-            .populate('requestedBy', 'name username avatar')
-            .populate('lastMessage')
-            .sort({ updatedAt: -1 });
+        const chats = await populateChatQuery(
+            Chat.find({
+                participants: req.userId,
+                deletedBy: { $ne: req.userId },
+                requestStatus: { $ne: 'rejected' },
+            }).sort({ updatedAt: -1 })
+        );
 
         res.json({ chats: chats.map((chat) => sanitizeChatForViewer(chat, req.userId)) });
     } catch (error) {
@@ -275,7 +296,12 @@ exports.createChat = async (req, res) => {
 // POST /api/chats/group - Create a group chat
 exports.createGroupChat = async (req, res) => {
     try {
-        const { name, participants } = req.body;
+        const { name } = req.body;
+        const participants = Array.isArray(req.body.participants)
+            ? req.body.participants
+            : Array.isArray(req.body['participants[]'])
+                ? req.body['participants[]']
+                : [req.body.participants || req.body['participants[]']].filter(Boolean);
 
         if (!name || !participants || participants.length < 2) {
             return res.status(400).json({ error: 'Group must have a name and at least 2 other members' });
@@ -299,23 +325,32 @@ exports.createGroupChat = async (req, res) => {
 
         const allParticipants = [...uniqueParticipantIds, req.userId];
 
+        let groupAvatar = '';
+        if (req.file) {
+            const upload = await uploadAvatar(req.file.path);
+            groupAvatar = upload.url;
+        }
+
         const chat = await Chat.create({
             isGroup: true,
             groupName: name,
+            groupAvatar,
+            groupOwner: req.userId,
             groupAdmin: req.userId,
+            groupAdmins: [req.userId],
             participants: allParticipants,
             requestStatus: 'accepted',
             // Group avatar can be handled via update later or default
         });
 
-        const populatedChat = await Chat.findById(chat._id)
-            .populate('participants', USER_PUBLIC_FIELDS)
-            .populate('groupAdmin', 'name username avatar');
+        const populatedChat = await populateChatQuery(Chat.findById(chat._id));
 
         res.status(201).json({ chat: sanitizeChatForViewer(populatedChat, req.userId) });
     } catch (error) {
         console.error('Create group error:', error);
         res.status(500).json({ error: 'Server error' });
+    } finally {
+        cleanupTempFile(req.file?.path);
     }
 };
 
@@ -413,9 +448,8 @@ exports.addToGroup = async (req, res) => {
             return res.status(403).json({ error: 'Access denied' });
         }
 
-        if (existingChat.groupAdmin?.toString() !== req.userId.toString()) {
-            return res.status(403).json({ error: 'Only the group admin can add members' });
-        }
+        syncGroupRoleState(existingChat);
+        ensureGroupAdmin(existingChat, req.userId);
 
         if (!idToAdd && username) {
             const user = await User.findOne({ username: username.toLowerCase() });
@@ -433,21 +467,106 @@ exports.addToGroup = async (req, res) => {
             return res.status(400).json({ error: 'User is already in the group' });
         }
 
-        const chat = await Chat.findByIdAndUpdate(
-            chatId,
-            { $addToSet: { participants: idToAdd } },
-            { new: true }
-        )
-            .populate('participants', USER_PUBLIC_FIELDS)
-            .populate('groupAdmin', 'name username avatar');
-
-        if (!chat) {
-            return res.status(404).json({ error: 'Chat not found' });
+        existingChat.participants.push(idToAdd);
+        if (existingChat.unreadCount?.set) {
+            existingChat.unreadCount.set(idToAdd.toString(), 0);
         }
+        syncGroupRoleState(existingChat);
+        await existingChat.save();
 
-        res.json({ chat: sanitizeChatForViewer(chat, req.userId) });
+        res.json({ chat: await populateAndSanitizeChatById(existingChat._id, req.userId) });
     } catch (error) {
         res.status(500).json({ error: 'Server error' });
+    }
+};
+
+exports.removeFromGroup = async (req, res) => {
+    try {
+        const { id: chatId, userId } = req.params;
+        if (!userId) {
+            return res.status(400).json({ error: 'User is required' });
+        }
+
+        const chat = await Chat.findOne({
+            _id: chatId,
+            participants: req.userId,
+            isGroup: true,
+        });
+
+        if (!chat) {
+            return res.status(404).json({ error: 'Group not found' });
+        }
+
+        syncGroupRoleState(chat);
+        ensureGroupAdmin(chat, req.userId);
+
+        if (userId.toString() === req.userId.toString()) {
+            return res.status(400).json({ error: 'Group admins cannot remove themselves here' });
+        }
+
+        if (!chat.participants.some((participantId) => participantId.toString() === userId.toString())) {
+            return res.status(404).json({ error: 'User is not in this group' });
+        }
+
+        if (sameId(getGroupOwnerId(chat), userId)) {
+            return res.status(400).json({ error: 'The group creator cannot be removed' });
+        }
+
+        chat.participants = chat.participants.filter((participantId) => participantId.toString() !== userId.toString());
+        chat.groupAdmins = getGroupAdminIds(chat).filter((adminId) => !sameId(adminId, userId));
+        chat.pinnedBy = (chat.pinnedBy || []).filter((participantId) => participantId.toString() !== userId.toString());
+        chat.archivedBy = (chat.archivedBy || []).filter((participantId) => participantId.toString() !== userId.toString());
+        chat.deletedBy = (chat.deletedBy || []).filter((participantId) => participantId.toString() !== userId.toString());
+        chat.pendingJoinRequests = (chat.pendingJoinRequests || []).filter((entry) => entry.userId.toString() !== userId.toString());
+
+        if (chat.unreadCount?.delete) {
+            chat.unreadCount.delete(userId.toString());
+        }
+
+        syncGroupRoleState(chat);
+        await chat.save();
+
+        res.json({ chat: await populateAndSanitizeChatById(chat._id, req.userId) });
+    } catch (error) {
+        res.status(error.statusCode || 500).json({ error: error.message || 'Server error' });
+    }
+};
+
+exports.updateGroupProfile = async (req, res) => {
+    try {
+        const chat = await Chat.findOne({
+            _id: req.params.id,
+            participants: req.userId,
+            isGroup: true,
+        });
+
+        if (!chat) {
+            return res.status(404).json({ error: 'Group not found' });
+        }
+
+        syncGroupRoleState(chat);
+        ensureGroupAdmin(chat, req.userId);
+
+        if (typeof req.body.groupName === 'string') {
+            const nextGroupName = req.body.groupName.trim().slice(0, 60);
+            if (!nextGroupName) {
+                return res.status(400).json({ error: 'Group name cannot be empty' });
+            }
+            chat.groupName = nextGroupName;
+        }
+
+        if (req.file) {
+            const upload = await uploadAvatar(req.file.path);
+            chat.groupAvatar = upload.url;
+        }
+
+        await chat.save();
+
+        res.json({ chat: await populateAndSanitizeChatById(chat._id, req.userId) });
+    } catch (error) {
+        res.status(error.statusCode || 500).json({ error: error.message || 'Server error' });
+    } finally {
+        cleanupTempFile(req.file?.path);
     }
 };
 
@@ -463,6 +582,7 @@ exports.updateGroupSettings = async (req, res) => {
             return res.status(404).json({ error: 'Group not found' });
         }
 
+        syncGroupRoleState(chat);
         ensureGroupAdmin(chat, req.userId);
 
         chat.groupSettings = normalizeGroupSettings({
@@ -494,6 +614,7 @@ exports.createInviteLink = async (req, res) => {
             return res.status(404).json({ error: 'Group not found' });
         }
 
+        syncGroupRoleState(chat);
         ensureGroupAdmin(chat, req.userId);
 
         const code = randomUUID().replace(/-/g, '').slice(0, 12);
@@ -529,6 +650,7 @@ exports.revokeInviteLink = async (req, res) => {
             return res.status(404).json({ error: 'Group not found' });
         }
 
+        syncGroupRoleState(chat);
         ensureGroupAdmin(chat, req.userId);
 
         const inviteLink = chat.inviteLinks.find((entry) => entry.code === req.params.code && !entry.revokedAt);
@@ -565,7 +687,7 @@ exports.getInviteInfo = async (req, res) => {
                 groupName: chat.groupName || 'Group Chat',
                 groupAvatar: chat.groupAvatar || '',
                 memberCount: (chat.participants || []).length,
-                groupAdmin: chat.groupAdmin,
+                groupAdmin: chat.groupOwner || chat.groupAdmin,
                 joinApprovalEnabled: !!chat.groupSettings?.joinApprovalEnabled,
                 alreadyJoined,
                 pendingRequest,
@@ -639,6 +761,7 @@ exports.reviewJoinRequest = async (req, res) => {
             return res.status(404).json({ error: 'Group not found' });
         }
 
+        syncGroupRoleState(chat);
         ensureGroupAdmin(chat, req.userId);
 
         const hasRequest = (chat.pendingJoinRequests || []).some((entry) => entry.userId.toString() === userId.toString());
@@ -650,6 +773,53 @@ exports.reviewJoinRequest = async (req, res) => {
         if (action === 'accept' && !chat.participants.some((participantId) => participantId.toString() === userId.toString())) {
             chat.participants.push(userId);
         }
+        await chat.save();
+
+        res.json({ chat: await populateAndSanitizeChatById(chat._id, req.userId) });
+    } catch (error) {
+        res.status(error.statusCode || 500).json({ error: error.message || 'Server error' });
+    }
+};
+
+exports.updateGroupMemberRole = async (req, res) => {
+    try {
+        const { role } = req.body;
+        const targetUserId = req.params.userId;
+
+        if (!['admin', 'member'].includes(role)) {
+            return res.status(400).json({ error: 'Role must be admin or member' });
+        }
+
+        const chat = await Chat.findOne({
+            _id: req.params.id,
+            participants: req.userId,
+            isGroup: true,
+        });
+
+        if (!chat) {
+            return res.status(404).json({ error: 'Group not found' });
+        }
+
+        syncGroupRoleState(chat);
+        ensureGroupAdmin(chat, req.userId);
+
+        if (!chat.participants.some((participantId) => sameId(participantId, targetUserId))) {
+            return res.status(404).json({ error: 'User is not in this group' });
+        }
+
+        if (sameId(getGroupOwnerId(chat), targetUserId)) {
+            return res.status(400).json({ error: 'The group creator role cannot be changed' });
+        }
+
+        const adminIds = new Set(getGroupAdminIds(chat).map((adminId) => `${adminId}`));
+        if (role === 'admin') {
+            adminIds.add(`${targetUserId}`);
+        } else {
+            adminIds.delete(`${targetUserId}`);
+        }
+
+        chat.groupAdmins = Array.from(adminIds);
+        syncGroupRoleState(chat);
         await chat.save();
 
         res.json({ chat: await populateAndSanitizeChatById(chat._id, req.userId) });

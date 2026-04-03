@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Globe, Instagram, AtSign, ImageIcon, Shield, Users, X, Pin, FileText, Link2, Mic, BellRing, Volume2, VolumeX, Clock3, Copy, Link2Off, UserPlus } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Globe, Instagram, AtSign, ImageIcon, Shield, Users, X, Pin, FileText, Link2, Mic, BellRing, Volume2, VolumeX, Clock3, Copy, Link2Off, UserPlus, Camera, UserMinus } from 'lucide-react';
 import toast from 'react-hot-toast';
 import useAuthStore from '../../store/useAuthStore';
 import useChatStore from '../../store/useChatStore';
 import api from '../../api/axios';
 import AvatarFallback from '../ui/AvatarFallback';
 import { formatLastSeen } from '../../utils/formatters';
+import { getDisplayName } from '../../utils/userDisplay';
 
 const InfoRow = ({ label, value }) => (
     <div>
@@ -149,12 +150,17 @@ export default function ChatDetailsDrawer({ mode, user: initialUser, chat, onClo
         isLoadingPinnedMessages,
         fetchPinnedMessages,
         togglePinMessage,
+        addToGroup,
+        removeFromGroup,
+        updateGroupMemberRole,
+        updateGroupProfile,
         updateGroupSettings,
         createInviteLink,
         revokeInviteLink,
         reviewJoinRequest,
     } = useChatStore();
     const [profileUser, setProfileUser] = useState(initialUser);
+    const [groupChatState, setGroupChatState] = useState(chat);
     const [isLoading, setIsLoading] = useState(mode === 'user');
     const [assetTab, setAssetTab] = useState('media');
     const [chatAssets, setChatAssets] = useState([]);
@@ -166,10 +172,20 @@ export default function ChatDetailsDrawer({ mode, user: initialUser, chat, onClo
         sound: 'default',
         desktop: false,
     });
+    const [memberUsername, setMemberUsername] = useState('');
+    const [memberSearchResults, setMemberSearchResults] = useState([]);
+    const [isSearchingMembers, setIsSearchingMembers] = useState(false);
+    const [isUpdatingGroupAvatar, setIsUpdatingGroupAvatar] = useState(false);
+    const avatarInputRef = useRef(null);
+    const activeChat = mode === 'group' ? (groupChatState || chat) : chat;
     const groupParticipants = useMemo(
-        () => (chat?.participants || []).filter(Boolean),
-        [chat?.participants]
+        () => (activeChat?.participants || []).filter(Boolean),
+        [activeChat?.participants]
     );
+
+    useEffect(() => {
+        setGroupChatState(chat);
+    }, [chat]);
 
     useEffect(() => {
         if (mode !== 'user' || !initialUser?._id) {
@@ -204,17 +220,17 @@ export default function ChatDetailsDrawer({ mode, user: initialUser, chat, onClo
     }, [mode, initialUser?._id]);
 
     useEffect(() => {
-        if (!chat?._id) return;
-        fetchPinnedMessages(chat._id).catch(() => { });
-    }, [chat?._id, fetchPinnedMessages]);
+        if (!activeChat?._id) return;
+        fetchPinnedMessages(activeChat._id).catch(() => { });
+    }, [activeChat?._id, fetchPinnedMessages]);
 
     useEffect(() => {
-        if (!chat?._id) return;
+        if (!activeChat?._id) return;
 
         let isMounted = true;
         setIsLoadingAssets(true);
 
-        api.get(`/chats/${chat._id}/assets?tab=${assetTab}`)
+        api.get(`/chats/${activeChat._id}/assets?tab=${assetTab}`)
             .then(({ data }) => {
                 if (!isMounted) return;
                 setChatAssets(data.items || []);
@@ -234,37 +250,90 @@ export default function ChatDetailsDrawer({ mode, user: initialUser, chat, onClo
         return () => {
             isMounted = false;
         };
-    }, [chat?._id, assetTab]);
+    }, [activeChat?._id, assetTab]);
 
     useEffect(() => {
-        if (!chat?._id) return;
-        const existing = (currentUser?.preferences?.chatNotifications || []).find((entry) => `${entry.chatId}` === `${chat._id}`);
+        if (!activeChat?._id) return;
+        const existing = (currentUser?.preferences?.chatNotifications || []).find((entry) => `${entry.chatId}` === `${activeChat._id}`);
         setNotificationSettings({
             mutedUntil: existing?.mutedUntil || null,
             mentionsOnly: !!existing?.mentionsOnly,
             sound: existing?.sound || 'default',
             desktop: !!existing?.desktop,
         });
-    }, [chat?._id, currentUser?.preferences?.chatNotifications]);
+    }, [activeChat?._id, currentUser?.preferences?.chatNotifications]);
 
-    const groupAdminId = useMemo(() => {
-        if (!chat?.groupAdmin) return null;
-        return chat.groupAdmin?._id || chat.groupAdmin;
-    }, [chat?.groupAdmin]);
+    const groupOwnerId = useMemo(() => {
+        if (!activeChat?.groupOwner && !activeChat?.groupAdmin) return null;
+        return activeChat?.groupOwner?._id || activeChat?.groupOwner || activeChat?.groupAdmin?._id || activeChat?.groupAdmin || null;
+    }, [activeChat?.groupOwner, activeChat?.groupAdmin]);
+    const groupAdminIds = useMemo(() => {
+        const explicitAdmins = Array.isArray(activeChat?.groupAdmins) ? activeChat.groupAdmins : [];
+        const normalized = explicitAdmins
+            .map((entry) => entry?._id || entry)
+            .filter(Boolean)
+            .map((entry) => `${entry}`);
 
-    const isCurrentUserGroupAdmin = !!currentUser?._id && `${groupAdminId}` === `${currentUser._id}`;
+        if (groupOwnerId && !normalized.includes(`${groupOwnerId}`)) {
+            normalized.push(`${groupOwnerId}`);
+        }
+
+        if (!normalized.length && activeChat?.groupAdmin) {
+            normalized.push(`${activeChat.groupAdmin?._id || activeChat.groupAdmin}`);
+        }
+
+        return Array.from(new Set(normalized));
+    }, [activeChat?.groupAdmins, activeChat?.groupAdmin, groupOwnerId]);
+    const groupAdminUsers = useMemo(() => (
+        groupParticipants.filter((participant) => groupAdminIds.some((adminId) => `${participant?._id}` === `${adminId}`))
+    ), [groupParticipants, groupAdminIds]);
+
+    const isCurrentUserGroupAdmin = !!currentUser?._id && groupAdminIds.some((adminId) => `${adminId}` === `${currentUser._id}`);
+    const isCurrentUserGroupOwner = !!currentUser?._id && `${groupOwnerId}` === `${currentUser._id}`;
+    useEffect(() => {
+        if (mode !== 'group' || !isCurrentUserGroupAdmin) {
+            setMemberSearchResults([]);
+            setIsSearchingMembers(false);
+            return undefined;
+        }
+
+        const normalizedQuery = memberUsername.trim().replace(/^@/, '');
+        if (!normalizedQuery) {
+            setMemberSearchResults([]);
+            setIsSearchingMembers(false);
+            return undefined;
+        }
+
+        const timer = setTimeout(async () => {
+            setIsSearchingMembers(true);
+            try {
+                const { data } = await api.get(`/users?search=${encodeURIComponent(normalizedQuery)}`);
+                const participantIds = new Set((groupParticipants || []).map((participant) => `${participant?._id || ''}`));
+                setMemberSearchResults(
+                    (data.users || []).filter((candidate) => candidate?._id && !participantIds.has(`${candidate._id}`))
+                );
+            } catch (error) {
+                setMemberSearchResults([]);
+            } finally {
+                setIsSearchingMembers(false);
+            }
+        }, 240);
+
+        return () => clearTimeout(timer);
+    }, [memberUsername, mode, isCurrentUserGroupAdmin, groupParticipants]);
+
     const normalizedGroupSettings = {
         adminOnlyMessages: false,
         allowMemberMedia: true,
         allowMemberPolls: true,
         joinApprovalEnabled: false,
         slowModeSeconds: 0,
-        ...(chat?.groupSettings || {}),
+        ...(activeChat?.groupSettings || {}),
     };
     const disappearingSettings = {
         enabled: false,
         durationHours: 0,
-        ...(chat?.disappearingMessages || {}),
+        ...(activeChat?.disappearingMessages || {}),
     };
     const disappearingOptions = [
         { value: 0, label: 'Off' },
@@ -281,9 +350,9 @@ export default function ChatDetailsDrawer({ mode, user: initialUser, chat, onClo
         { value: 900, label: '15m' },
         { value: 3600, label: '1h' },
     ];
-    const activeInviteLinks = (chat?.inviteLinks || []).filter((entry) => !entry?.revokedAt);
-    const pendingJoinRequests = chat?.pendingJoinRequests || [];
-    const canManagePins = !chat?.isGroup || isCurrentUserGroupAdmin;
+    const activeInviteLinks = (activeChat?.inviteLinks || []).filter((entry) => !entry?.revokedAt);
+    const pendingJoinRequests = activeChat?.pendingJoinRequests || [];
+    const canManagePins = !activeChat?.isGroup || isCurrentUserGroupAdmin;
     const getMutePresetId = (mutedUntil) => {
         if (!mutedUntil) return 'off';
         const diff = new Date(mutedUntil).getTime() - Date.now();
@@ -303,7 +372,7 @@ export default function ChatDetailsDrawer({ mode, user: initialUser, chat, onClo
     ];
 
     const persistNotificationSettings = async (partial) => {
-        if (!chat?._id) return;
+        if (!activeChat?._id) return;
         const nextSettings = {
             ...notificationSettings,
             ...partial,
@@ -320,7 +389,7 @@ export default function ChatDetailsDrawer({ mode, user: initialUser, chat, onClo
         setNotificationSettings(nextSettings);
         try {
             await saveChatNotificationSettings({
-                chatId: chat._id,
+                chatId: activeChat._id,
                 mutedUntil: nextSettings.mutedUntil,
                 mentionsOnly: nextSettings.mentionsOnly,
                 sound: nextSettings.sound,
@@ -332,9 +401,9 @@ export default function ChatDetailsDrawer({ mode, user: initialUser, chat, onClo
         }
     };
     const persistGroupControls = async (partial = {}) => {
-        if (!chat?._id || !isCurrentUserGroupAdmin) return;
+        if (!activeChat?._id || !isCurrentUserGroupAdmin) return;
         try {
-            await updateGroupSettings(chat._id, {
+            const nextChat = await updateGroupSettings(activeChat._id, {
                 groupSettings: {
                     ...normalizedGroupSettings,
                     ...(partial.groupSettings || {}),
@@ -344,6 +413,7 @@ export default function ChatDetailsDrawer({ mode, user: initialUser, chat, onClo
                     ...(partial.disappearingMessages || {}),
                 },
             });
+            setGroupChatState(nextChat);
         } catch (error) {
             console.error('Failed to persist group controls', error);
         }
@@ -361,19 +431,80 @@ export default function ChatDetailsDrawer({ mode, user: initialUser, chat, onClo
         }
     };
     const handleCreateInviteLink = async () => {
-        if (!chat?._id) return;
+        if (!activeChat?._id) return;
         try {
-            const inviteLink = await createInviteLink(chat._id);
-            if (inviteLink) {
-                await handleCopyInviteLink(inviteLink, { silent: true });
+            const result = await createInviteLink(activeChat._id);
+            if (result?.chat) {
+                setGroupChatState(result.chat);
+            }
+            if (result?.inviteLink) {
+                await handleCopyInviteLink(result.inviteLink, { silent: true });
             }
         } catch (error) {
             console.error('Failed to create invite link', error);
         }
     };
+    const handleAddMember = async (selectedUser = null) => {
+        const username = memberUsername.trim().replace(/^@/, '');
+        const selectedUserId = selectedUser?._id || null;
+        if ((!username && !selectedUserId) || !activeChat?._id) {
+            toast.error('Search for someone to add');
+            return;
+        }
+
+        try {
+            const nextChat = await addToGroup(activeChat._id, selectedUserId, selectedUserId ? null : username);
+            setGroupChatState(nextChat);
+            setMemberUsername('');
+            setMemberSearchResults([]);
+        } catch (error) {
+            console.error('Failed to add member', error);
+        }
+    };
+    const handleRemoveMember = async (participantId) => {
+        if (!activeChat?._id) return;
+        if (!window.confirm('Remove this member from the group?')) return;
+
+        try {
+            const nextChat = await removeFromGroup(activeChat._id, participantId);
+            setGroupChatState(nextChat);
+        } catch (error) {
+            console.error('Failed to remove member', error);
+        }
+    };
+    const handleUpdateMemberRole = async (participantId, nextRole) => {
+        if (!activeChat?._id) return;
+        try {
+            const nextChat = await updateGroupMemberRole(activeChat._id, participantId, nextRole);
+            setGroupChatState(nextChat);
+        } catch (error) {
+            console.error('Failed to update member role', error);
+        }
+    };
+    const handleGroupAvatarChange = async (event) => {
+        const file = event.target.files?.[0];
+        if (!file || !activeChat?._id) return;
+
+        const formData = new FormData();
+        formData.append('groupAvatar', file);
+
+        setIsUpdatingGroupAvatar(true);
+        try {
+            const nextChat = await updateGroupProfile(activeChat._id, formData);
+            setGroupChatState(nextChat);
+        } catch (error) {
+            console.error('Failed to update group icon', error);
+        } finally {
+            setIsUpdatingGroupAvatar(false);
+            event.target.value = '';
+        }
+    };
     const memberPermissionSummary = normalizedGroupSettings.adminOnlyMessages
         ? 'Only admins can post right now. Members can still read, react, and join calls.'
         : `${normalizedGroupSettings.allowMemberMedia ? 'Members can share media.' : 'Media sharing is admin only.'} ${normalizedGroupSettings.allowMemberPolls ? 'Members can create polls.' : 'Polls are admin only.'}`;
+    const adminSummary = groupAdminUsers.length > 0
+        ? groupAdminUsers.map((participant) => participant?.name || participant?.username || 'Admin').join(', ')
+        : 'No admins available';
 
     const NotificationSection = ({ isGroupChat = false }) => (
         <section className="glass-card rounded-3xl p-5 sm:p-6">
@@ -481,27 +612,62 @@ export default function ChatDetailsDrawer({ mode, user: initialUser, chat, onClo
                     <div className="p-4 sm:p-6 space-y-5 sm:space-y-6">
                         <section className="glass-card rounded-3xl p-5 sm:p-6">
                             <div className="flex flex-col items-center text-center">
-                                <div className="w-28 h-28 rounded-full overflow-hidden ring-4 ring-primary-500/20 mb-5">
-                                    {chat?.groupAvatar ? (
-                                        <img src={chat.groupAvatar} alt={chat.groupName} className="w-full h-full object-cover" />
+                                <div className="relative w-28 h-28 rounded-full overflow-hidden ring-4 ring-primary-500/20 mb-5">
+                                    {activeChat?.groupAvatar ? (
+                                        <img src={activeChat.groupAvatar} alt={activeChat.groupName} className="w-full h-full object-cover" />
                                     ) : (
-                                        <AvatarFallback name={chat?.groupName || 'Group'} className="text-3xl" variant="group" icon={<Users className="w-10 h-10" />} />
+                                        <AvatarFallback name={activeChat?.groupName || 'Group'} className="text-3xl" variant="group" icon={<Users className="w-10 h-10" />} />
+                                    )}
+                                    {isCurrentUserGroupAdmin && (
+                                        <>
+                                            <input
+                                                ref={avatarInputRef}
+                                                type="file"
+                                                accept="image/*"
+                                                onChange={handleGroupAvatarChange}
+                                                className="hidden"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => avatarInputRef.current?.click()}
+                                                disabled={isUpdatingGroupAvatar}
+                                                className="absolute bottom-1 right-1 w-9 h-9 rounded-full bg-black/70 backdrop-blur-md flex items-center justify-center hover:bg-black/80 transition-colors disabled:opacity-60"
+                                                title="Change group icon"
+                                            >
+                                                {isUpdatingGroupAvatar ? (
+                                                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                                ) : (
+                                                    <Camera className="w-4 h-4 text-white" />
+                                                )}
+                                            </button>
+                                        </>
                                     )}
                                 </div>
-                                <h3 className="text-lg font-semibold">{chat?.groupName || 'Group Chat'}</h3>
+                                <h3 className="text-lg font-semibold">{activeChat?.groupName || 'Group Chat'}</h3>
                                 <p className="text-sm opacity-55">{groupParticipants.length} members</p>
+                                {isCurrentUserGroupAdmin && (
+                                    <p className="text-xs opacity-45 mt-3">Tap the camera icon to add or change the group icon.</p>
+                                )}
                             </div>
 
                             <div className="mt-6 space-y-4">
                                 <InfoRow
                                     label="Your Permission"
-                                    value={isCurrentUserGroupAdmin ? 'Admin - can manage members, invites, permissions, and disappearing timers' : 'Member - can chat within the current group rules and view shared details'}
+                                    value={isCurrentUserGroupOwner
+                                        ? 'Owner - created this group and cannot be demoted'
+                                        : isCurrentUserGroupAdmin
+                                            ? 'Admin - can manage members, invites, permissions, and disappearing timers'
+                                            : 'Member - can chat within the current group rules and view shared details'}
                                 />
                                 <InfoRow
-                                    label="Group Admin"
-                                    value={chat?.groupAdmin?.name
-                                        ? `${chat.groupAdmin.name}${chat.groupAdmin.username ? ` (@${chat.groupAdmin.username})` : ''}`
+                                    label="Group Owner"
+                                    value={activeChat?.groupOwner?.name || activeChat?.groupAdmin?.name
+                                        ? `${activeChat.groupOwner?.name || activeChat.groupAdmin?.name}${(activeChat.groupOwner?.username || activeChat.groupAdmin?.username) ? ` (@${activeChat.groupOwner?.username || activeChat.groupAdmin?.username})` : ''}`
                                         : 'Unknown'}
+                                />
+                                <InfoRow
+                                    label="Admins"
+                                    value={adminSummary}
                                 />
                                 <InfoRow
                                     label="What Members Can Do"
@@ -607,7 +773,7 @@ export default function ChatDetailsDrawer({ mode, user: initialUser, chat, onClo
 
                                 {!isCurrentUserGroupAdmin && (
                                     <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-3 text-sm opacity-60">
-                                        Only the current group admin can change these controls.
+                                        Only group admins can change these controls.
                                     </div>
                                 )}
                             </div>
@@ -655,7 +821,9 @@ export default function ChatDetailsDrawer({ mode, user: initialUser, chat, onClo
                                                 </button>
                                                 {isCurrentUserGroupAdmin && (
                                                     <button
-                                                        onClick={() => revokeInviteLink(chat._id, inviteLink.code).catch(() => { })}
+                                                        onClick={() => revokeInviteLink(activeChat._id, inviteLink.code).then((nextChat) => {
+                                                            setGroupChatState(nextChat);
+                                                        }).catch(() => { })}
                                                         className="p-2 rounded-xl hover:bg-red-500/10 text-red-300"
                                                         title="Revoke invite link"
                                                     >
@@ -707,13 +875,17 @@ export default function ChatDetailsDrawer({ mode, user: initialUser, chat, onClo
                                                     {isCurrentUserGroupAdmin && requester?._id && (
                                                         <div className="flex items-center gap-2 flex-shrink-0">
                                                             <button
-                                                                onClick={() => reviewJoinRequest(chat._id, requester._id, 'accept').catch(() => { })}
+                                                                onClick={() => reviewJoinRequest(activeChat._id, requester._id, 'accept').then((nextChat) => {
+                                                                    setGroupChatState(nextChat);
+                                                                }).catch(() => { })}
                                                                 className="btn-glass px-3 py-2 text-sm"
                                                             >
                                                                 Accept
                                                             </button>
                                                             <button
-                                                                onClick={() => reviewJoinRequest(chat._id, requester._id, 'reject').catch(() => { })}
+                                                                onClick={() => reviewJoinRequest(activeChat._id, requester._id, 'reject').then((nextChat) => {
+                                                                    setGroupChatState(nextChat);
+                                                                }).catch(() => { })}
                                                                 className="px-3 py-2 rounded-2xl border border-red-400/20 bg-red-500/10 text-red-200 text-sm hover:bg-red-500/15 transition-colors"
                                                             >
                                                                 Reject
@@ -799,9 +971,84 @@ export default function ChatDetailsDrawer({ mode, user: initialUser, chat, onClo
                                 <h3 className="font-semibold text-sm">Members & Roles</h3>
                             </div>
 
+                            {isCurrentUserGroupAdmin && (
+                                <div className="rounded-2xl border border-white/8 bg-white/5 p-4 mb-4">
+                                    <p className="text-xs uppercase tracking-[0.18em] opacity-40 mb-2">Add member</p>
+                                    <div className="flex flex-col sm:flex-row gap-2">
+                                        <input
+                                            type="text"
+                                            value={memberUsername}
+                                            onChange={(event) => setMemberUsername(event.target.value)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    handleAddMember(memberSearchResults[0] || null);
+                                                }
+                                            }}
+                                            placeholder="Search by name or username..."
+                                            className="input-glass py-2 text-sm"
+                                        />
+                                        <button
+                                            onClick={() => handleAddMember(memberSearchResults[0] || null)}
+                                            className="btn-glass px-4 py-2 text-sm whitespace-nowrap"
+                                        >
+                                            <span className="flex items-center gap-2"><UserPlus className="w-4 h-4" /> Add</span>
+                                        </button>
+                                    </div>
+                                    <p className="text-xs opacity-45 mt-2">Type a name or username, then tap the person you want to add.</p>
+                                    {(isSearchingMembers || memberSearchResults.length > 0 || memberUsername.trim()) && (
+                                        <div className="mt-3 max-h-56 overflow-y-auto space-y-2">
+                                            {isSearchingMembers ? (
+                                                <div className="rounded-2xl border border-white/8 bg-white/5 p-3 text-sm opacity-60">
+                                                    Searching people...
+                                                </div>
+                                            ) : memberSearchResults.length > 0 ? memberSearchResults.map((candidate) => {
+                                                const displayName = getDisplayName(candidate, currentUser);
+                                                return (
+                                                    <button
+                                                        key={candidate._id}
+                                                        type="button"
+                                                        onClick={() => handleAddMember(candidate)}
+                                                        className="w-full rounded-2xl border border-white/8 bg-white/5 px-3 py-3 hover:bg-white/8 transition-colors text-left"
+                                                    >
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="w-11 h-11 rounded-full overflow-hidden ring-1 ring-white/10 flex-shrink-0">
+                                                                {candidate.avatar ? (
+                                                                    <img src={candidate.avatar} alt={candidate.name} className="w-full h-full object-cover" />
+                                                                ) : (
+                                                                    <AvatarFallback name={candidate.name} className="text-sm" />
+                                                                )}
+                                                            </div>
+                                                            <div className="min-w-0 flex-1">
+                                                                <p className="text-sm font-semibold truncate">{displayName}</p>
+                                                                {displayName !== candidate.name && (
+                                                                    <p className="text-xs opacity-45 truncate">{candidate.name}</p>
+                                                                )}
+                                                                <p className="text-xs opacity-45 truncate">
+                                                                    {candidate.username ? `@${candidate.username}` : 'No username'}
+                                                                </p>
+                                                            </div>
+                                                            <span className="badge-pill !bg-primary-500/15 !text-primary-200">
+                                                                Add
+                                                            </span>
+                                                        </div>
+                                                    </button>
+                                                );
+                                            }) : (
+                                                <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 p-3 text-sm opacity-60">
+                                                    No people found with that name or username.
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
                             <div className="space-y-3">
                                 {groupParticipants.map((participant) => {
-                                    const role = `${groupAdminId}` === `${participant._id}` ? 'Admin' : 'Member';
+                                    const isOwner = `${groupOwnerId}` === `${participant._id}`;
+                                    const isAdmin = groupAdminIds.some((adminId) => `${adminId}` === `${participant._id}`);
+                                    const role = isOwner ? 'Owner' : isAdmin ? 'Admin' : 'Member';
                                     const isSelf = `${participant._id}` === `${currentUser?._id}`;
 
                                     return (
@@ -821,7 +1068,7 @@ export default function ChatDetailsDrawer({ mode, user: initialUser, chat, onClo
                                                         {isSelf && (
                                                             <span className="badge-pill">You</span>
                                                         )}
-                                                        <span className={`badge-pill ${role === 'Admin' ? '!bg-primary-500/15 !text-primary-300' : ''}`}>
+                                                        <span className={`badge-pill ${role !== 'Member' ? '!bg-primary-500/15 !text-primary-300' : ''}`}>
                                                             {role}
                                                         </span>
                                                     </div>
@@ -829,11 +1076,44 @@ export default function ChatDetailsDrawer({ mode, user: initialUser, chat, onClo
                                                         {participant.username ? `@${participant.username}` : 'No username'}
                                                     </p>
                                                     <p className="text-xs opacity-45 mt-1">
-                                                        {role === 'Admin'
+                                                        {role === 'Owner'
+                                                            ? 'Created the group and always stays the owner'
+                                                            : role === 'Admin'
                                                             ? 'Can add members and manage group settings'
                                                             : 'Can send messages, join calls, and view shared group info'}
                                                     </p>
                                                 </div>
+                                                {isCurrentUserGroupAdmin && !isSelf && !isOwner && (
+                                                    <div className="flex items-center gap-2 flex-shrink-0">
+                                                        {isAdmin ? (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleUpdateMemberRole(participant._id, 'member')}
+                                                                className="px-3 py-2 rounded-xl border border-amber-400/20 bg-amber-500/10 text-amber-200 text-xs hover:bg-amber-500/15 transition-colors"
+                                                                title="Change to member"
+                                                            >
+                                                                Make Member
+                                                            </button>
+                                                        ) : (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleUpdateMemberRole(participant._id, 'admin')}
+                                                                className="px-3 py-2 rounded-xl border border-primary-400/20 bg-primary-500/10 text-primary-100 text-xs hover:bg-primary-500/15 transition-colors"
+                                                                title="Make admin"
+                                                            >
+                                                                Make Admin
+                                                            </button>
+                                                        )}
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleRemoveMember(participant._id)}
+                                                            className="p-2 rounded-xl hover:bg-red-500/10 text-red-300 flex-shrink-0"
+                                                            title="Remove member"
+                                                        >
+                                                            <UserMinus className="w-4 h-4" />
+                                                        </button>
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     );

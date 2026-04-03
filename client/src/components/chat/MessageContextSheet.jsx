@@ -3,7 +3,7 @@
 
 import { useEffect } from 'react';
 import {
-    Bookmark, Check, Clock3, Edit3, EyeOff, Forward, Pin,
+    Bookmark, Check, Clock3, Edit3, EyeOff, Forward, Info, Pin,
     Reply, SmilePlus, Star, Trash2, X,
 } from 'lucide-react';
 import { EMOJI_LIST } from '../../utils/constants';
@@ -23,6 +23,8 @@ export default function MessageContextSheet({
     onPin,
     onBookmark,
     onRemind,
+    onInfo,
+    canEdit,
     onEdit,
     onDeleteMe,
     onDeleteAll,
@@ -45,7 +47,10 @@ export default function MessageContextSheet({
         { icon: <Pin className={`w-5 h-5 ${isPinned ? 'text-primary-300' : ''}`} />, label: isPinned ? 'Unpin' : 'Pin', fn: action(onPin) },
         { icon: <Bookmark className="w-5 h-5" />, label: 'Bookmark', fn: action(onBookmark) },
         { icon: <Clock3 className="w-5 h-5" />, label: 'Remind me', fn: action(onRemind) },
-        ...(isOwn && message?.type === 'text' ? [
+        ...(isOwn && onInfo ? [
+            { icon: <Info className="w-5 h-5" />, label: 'Info', fn: action(onInfo) },
+        ] : []),
+        ...(isOwn && message?.type === 'text' && canEdit ? [
             { icon: <Edit3 className="w-5 h-5" />, label: 'Edit', fn: onEdit /* keep sheet open for edit */ },
         ] : []),
         ...(isOwn ? [

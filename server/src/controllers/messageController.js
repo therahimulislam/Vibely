@@ -16,7 +16,13 @@ const {
 const {
     ensureCanPostInGroup,
     getMessageExpiryForChat,
+    isGroupAdmin,
 } = require('../utils/chatRules');
+const {
+    EDIT_WINDOW_MS,
+    canEditMessage,
+    markMessagesAsSeenForReader,
+} = require('../utils/messageReadState');
 
 const MESSAGE_SENDER_FIELDS = 'name avatar username';
 const REPLY_PREVIEW_FIELDS = 'text type fileUrl fileName createdAt isDeleted poll forwardedFrom viewOnce';
@@ -167,10 +173,14 @@ const ensureChatCanCreateMessage = async (chat, userId, { messageType = 'text', 
 const ensureCanPinMessage = (chat, userId) => {
     if (!chat.isGroup) return;
 
-    if (chat.groupAdmin?.toString() !== userId.toString()) {
+    if (!isGroupAdmin(chat, userId)) {
         throw Object.assign(new Error('Only group admins can pin messages'), { statusCode: 403 });
     }
 };
+
+const populateMessageInfo = (messageId) => Message.findById(messageId)
+    .populate('senderId', MESSAGE_SENDER_FIELDS)
+    .populate('seenBy.userId', MESSAGE_SENDER_FIELDS);
 
 // GET /api/messages/:chatId - Get messages with pagination
 exports.getMessages = async (req, res) => {
@@ -638,18 +648,7 @@ exports.markAsSeen = async (req, res) => {
             return res.status(403).json({ error: 'Access denied' });
         }
 
-        await Message.updateMany(
-            {
-                chatId,
-                senderId: { $ne: req.userId },
-                status: { $ne: 'seen' },
-                $or: [
-                    { expiresAt: null },
-                    { expiresAt: { $gt: new Date() } },
-                ],
-            },
-            { status: 'seen' }
-        );
+        await markMessagesAsSeenForReader({ chatId, readerId: req.userId });
 
         // Reset unread count
         chat.unreadCount.set(req.userId.toString(), 0);
@@ -674,18 +673,83 @@ exports.editMessage = async (req, res) => {
             return res.status(403).json({ error: 'Can only edit your own messages' });
         }
 
-        // Can only edit within 15 minutes
-        const fifteenMinutes = 15 * 60 * 1000;
-        if (Date.now() - message.createdAt.getTime() > fifteenMinutes) {
+        if (!canEditMessage(message)) {
             return res.status(400).json({ error: 'Can only edit messages within 15 minutes' });
         }
 
-        message.text = typeof req.body.text === 'string' ? req.body.text.trim() : '';
+        const nextText = typeof req.body.text === 'string' ? req.body.text.trim() : '';
+        if (!nextText) {
+            return res.status(400).json({ error: 'Edited message cannot be empty' });
+        }
+
+        message.text = nextText;
         message.isEdited = true;
+        message.editedAt = new Date();
         await message.save();
 
         const populated = await populateMessage(message._id);
         res.json({ message: sanitizeMessageForViewer(populated, req.userId) });
+    } catch (error) {
+        res.status(error.statusCode || 500).json({ error: error.message || 'Server error' });
+    }
+};
+
+// GET /api/messages/:id/info - Get detailed status/read info for a message
+exports.getMessageInfo = async (req, res) => {
+    try {
+        const message = await Message.findById(req.params.id);
+        if (!message) {
+            return res.status(404).json({ error: 'Message not found' });
+        }
+        ensureMessageNotExpired(message);
+
+        const chat = await Chat.findOne({
+            _id: message.chatId,
+            participants: req.userId,
+        }).populate('participants', MESSAGE_SENDER_FIELDS);
+
+        if (!chat) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+
+        const populatedMessage = await populateMessageInfo(message._id);
+        const isSender = sameId(populatedMessage.senderId?._id || populatedMessage.senderId, req.userId);
+        const readEntries = (populatedMessage.seenBy || [])
+            .filter((entry) => !sameId(entry?.userId?._id || entry?.userId, populatedMessage.senderId?._id || populatedMessage.senderId));
+        const visibleReadEntries = isSender
+            ? readEntries
+            : readEntries.filter((entry) => sameId(entry?.userId?._id || entry?.userId, req.userId));
+        const pendingReaders = isSender
+            ? (chat.participants || []).filter((participant) =>
+                !sameId(participant?._id, populatedMessage.senderId?._id || populatedMessage.senderId)
+                && !readEntries.some((entry) => sameId(entry?.userId?._id || entry?.userId, participant?._id))
+            )
+            : [];
+
+        res.json({
+            messageInfo: {
+                _id: populatedMessage._id,
+                text: populatedMessage.text || '',
+                type: populatedMessage.type,
+                createdAt: populatedMessage.createdAt,
+                updatedAt: populatedMessage.updatedAt,
+                isEdited: !!populatedMessage.isEdited,
+                editedAt: populatedMessage.editedAt,
+                status: populatedMessage.status,
+                canEdit: isSender && canEditMessage(populatedMessage),
+                editableUntil: isSender ? new Date(new Date(populatedMessage.createdAt).getTime() + EDIT_WINDOW_MS) : null,
+                readBy: visibleReadEntries.map((entry) => ({
+                    user: entry.userId,
+                    seenAt: entry.seenAt,
+                })),
+                pendingReaders: pendingReaders.map((participant) => ({
+                    _id: participant._id,
+                    name: participant.name,
+                    username: participant.username,
+                    avatar: participant.avatar,
+                })),
+            },
+        });
     } catch (error) {
         res.status(error.statusCode || 500).json({ error: error.message || 'Server error' });
     }

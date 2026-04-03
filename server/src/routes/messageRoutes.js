@@ -14,6 +14,7 @@ router.get('/scheduled/:chatId', messageController.getScheduledMessages);
 router.delete('/scheduled/:id', messageController.deleteScheduledMessage);
 router.patch('/scheduled/:id', messageController.updateScheduledMessage);
 router.get('/pins/:chatId', messageController.getPinnedMessages);
+router.get('/:id/info', messageController.getMessageInfo);
 router.get('/:chatId/search', messageController.searchMessages);
 router.get('/:chatId', messageController.getMessages);
 router.post('/poll', messageController.createPoll);

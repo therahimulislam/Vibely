@@ -11,6 +11,8 @@ export default function StatusViewer({ group, isOwn, onClose }) {
     const [index, setIndex] = useState(0);
     const [showViewers, setShowViewers] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+    const [isDeleting, setIsDeleting] = useState(false);
+    const isProgressPaused = showViewers || showDeleteConfirm;
 
     const items = useMemo(() => group?.items || [], [group]);
     const activeItem = items[index];
@@ -22,6 +24,10 @@ export default function StatusViewer({ group, isOwn, onClose }) {
             markViewed(activeItem._id);
         }
 
+        if (isProgressPaused) {
+            return undefined;
+        }
+
         const timeout = window.setTimeout(() => {
             if (index < items.length - 1) {
                 setIndex((current) => current + 1);
@@ -31,17 +37,21 @@ export default function StatusViewer({ group, isOwn, onClose }) {
         }, DURATION_MS);
 
         return () => window.clearTimeout(timeout);
-    }, [activeItem?._id, index, isOwn, items.length, markViewed, onClose]);
+    }, [activeItem?._id, index, isOwn, isProgressPaused, items.length, markViewed, onClose]);
 
     if (!group || !activeItem) return null;
 
     const handleDelete = async () => {
         try {
+            setIsDeleting(true);
             await deleteStatus(activeItem._id);
             toast.success('Status deleted');
+            setShowDeleteConfirm(false);
             onClose();
         } catch (error) {
             toast.error(error.message);
+        } finally {
+            setIsDeleting(false);
         }
     };
 
@@ -68,9 +78,20 @@ export default function StatusViewer({ group, isOwn, onClose }) {
                     <div className="flex gap-1.5 mb-4">
                         {items.map((item, itemIndex) => (
                             <div key={item._id} className="h-1 flex-1 rounded-full bg-white/20 overflow-hidden">
-                                <div
-                                    className={`h-full ${itemIndex < index ? 'w-full' : itemIndex === index ? 'w-2/3' : 'w-0'} bg-white`}
-                                />
+                                {itemIndex < index ? (
+                                    <div className="h-full w-full bg-white" />
+                                ) : itemIndex === index ? (
+                                    <div
+                                        key={`${item._id}-${index}`}
+                                        className="h-full bg-white status-progress-fill"
+                                        style={{
+                                            animationDuration: `${DURATION_MS}ms`,
+                                            animationPlayState: isProgressPaused ? 'paused' : 'running',
+                                        }}
+                                    />
+                                ) : (
+                                    <div className="h-full w-0 bg-white" />
+                                )}
                             </div>
                         ))}
                     </div>
@@ -176,19 +197,20 @@ export default function StatusViewer({ group, isOwn, onClose }) {
                             </p>
                             <div className="mt-5 flex items-center justify-end gap-3">
                                 <button
+                                    type="button"
+                                    disabled={isDeleting}
                                     onClick={() => setShowDeleteConfirm(false)}
-                                    className="px-4 py-2 rounded-xl bg-white/8 hover:bg-white/12 text-sm transition-colors"
+                                    className="px-4 py-2 rounded-xl bg-white/8 hover:bg-white/12 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                                 >
                                     Cancel
                                 </button>
                                 <button
-                                    onClick={async () => {
-                                        setShowDeleteConfirm(false);
-                                        await handleDelete();
-                                    }}
-                                    className="px-4 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-sm font-medium transition-colors"
+                                    type="button"
+                                    disabled={isDeleting}
+                                    onClick={handleDelete}
+                                    className="px-4 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60"
                                 >
-                                    Okay
+                                    {isDeleting ? 'Deleting...' : 'Delete'}
                                 </button>
                             </div>
                         </div>

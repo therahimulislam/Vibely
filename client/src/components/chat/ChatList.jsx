@@ -5,6 +5,7 @@ import useChatStore from '../../store/useChatStore';
 import useAuthStore from '../../store/useAuthStore';
 import ChatItem from './ChatItem';
 import { MessageCircle } from 'lucide-react';
+import { getDisplayName } from '../../utils/userDisplay';
 
 function ChatSection({ title, count, children }) {
     if (!children) return null;
@@ -20,11 +21,19 @@ function ChatSection({ title, count, children }) {
     );
 }
 
-export default function ChatList({ filterMode = 'all' }) {
+export default function ChatList({ filterMode = 'all', showSavedMessages = true }) {
     const { chats, activeChat, setActiveChat, searchQuery, isLoadingChats, onlineUsers, typingUsers } = useChatStore();
     const { user } = useAuthStore();
-    const chatFolders = user?.preferences?.chatFolders || [];
-    const chatDrafts = user?.preferences?.chatDrafts || [];
+    const chatFolders = Array.isArray(user?.preferences?.chatFolders) ? user.preferences.chatFolders : [];
+    const chatDrafts = Array.isArray(user?.preferences?.chatDrafts) ? user.preferences.chatDrafts : [];
+
+    if (!user?._id) {
+        return (
+            <div className="flex items-center justify-center py-12 text-sm opacity-50">
+                Loading conversations...
+            </div>
+        );
+    }
     const isArchivedChat = (chat) => chat.archivedBy?.some((id) => String(id) === String(user?._id));
     const activeFolderId = filterMode.startsWith('folder:') ? filterMode.slice('folder:'.length) : '';
     const activeFolder = chatFolders.find((folder) => folder.folderId === activeFolderId) || null;
@@ -38,19 +47,20 @@ export default function ChatList({ filterMode = 'all' }) {
     const safeChats = Array.isArray(chats) ? chats : [];
     const filteredBySearch = searchQuery
         ? safeChats.filter((chat) => {
+            const normalizedQuery = searchQuery.toLowerCase();
             if (chat.isSavedMessages) {
-                return 'saved messages'.includes(searchQuery.toLowerCase()) || 'personal cloud'.includes(searchQuery.toLowerCase());
+                return 'saved messages'.includes(normalizedQuery) || 'personal cloud'.includes(normalizedQuery);
             }
             if (chat.isGroup) {
-                return chat.groupName.toLowerCase().includes(searchQuery.toLowerCase());
+                return `${chat.groupName || 'group chat'}`.toLowerCase().includes(normalizedQuery);
             }
-            // Filter nulls first
             const validParticipants = (chat.participants || []).filter(p => p);
             return validParticipants.some(
-                (p) =>
-                    p._id !== user._id &&
-                    (p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                        p.username?.toLowerCase().includes(searchQuery.toLowerCase()))
+                (p) => p._id !== user._id && (
+                    getDisplayName(p, user).toLowerCase().includes(normalizedQuery)
+                    || `${p.name || ''}`.toLowerCase().includes(normalizedQuery)
+                    || `${p.username || ''}`.toLowerCase().includes(normalizedQuery)
+                )
             );
         })
         : safeChats;
@@ -58,6 +68,10 @@ export default function ChatList({ filterMode = 'all' }) {
     const filteredChats = filteredBySearch.filter((chat) => {
         const archived = isArchivedChat(chat);
         const matchesFolder = !activeFolderId || getFoldersForChat(chat._id).some((folder) => folder.folderId === activeFolderId);
+
+        if (!showSavedMessages && chat.isSavedMessages) {
+            return false;
+        }
 
         if (activeFolderId) {
             return matchesFolder;
@@ -139,7 +153,14 @@ export default function ChatList({ filterMode = 'all' }) {
             };
         } else {
             const validParticipants = (chat.participants || []).filter(p => p);
-            displayUser = validParticipants.find((p) => p._id !== user._id);
+            const participant = validParticipants.find((p) => p._id !== user._id);
+            displayUser = participant
+                ? {
+                    ...participant,
+                    originalName: participant.name,
+                    name: getDisplayName(participant, user),
+                }
+                : null;
             if (!displayUser) return null;
             isOnline = onlineUsers instanceof Set ? onlineUsers.has(displayUser._id) : !!displayUser.isOnline;
         }

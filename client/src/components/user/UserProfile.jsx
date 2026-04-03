@@ -474,6 +474,13 @@ export default function UserProfile({ onClose }) {
                     file={pendingAvatarFile}
                     onCancel={() => setPendingAvatarFile(null)}
                     onConfirm={uploadAvatar}
+                    title="Adjust profile photo"
+                    subtitle="Crop your avatar before uploading"
+                    confirmLabel="Use photo"
+                    outputWidth={512}
+                    outputHeight={512}
+                    outputMimeType="image/png"
+                    maskShape="circle"
                 />
             )}
         </div>

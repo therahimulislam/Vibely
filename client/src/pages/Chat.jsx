@@ -1,27 +1,46 @@
 // client/src/pages/Chat.jsx
 // Main chat page with sidebar + message area layout
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import useAuthStore from '../store/useAuthStore';
 import useChatStore from '../store/useChatStore';
+import useStatusStore from '../store/useStatusStore';
 import Sidebar from '../components/layout/Sidebar';
 import MessageArea from '../components/chat/MessageArea';
 import UserProfile from '../components/user/UserProfile';
 import ChatDetailsDrawer from '../components/user/ChatDetailsDrawer';
+import StatusPage from '../components/status/StatusPage';
+import StatusComposerModal from '../components/status/StatusComposerModal';
+import StatusViewer from '../components/status/StatusViewer';
 import { MessageCircle } from 'lucide-react';
 import ErrorBoundary from '../components/ErrorBoundary';
 
 export default function Chat() {
     const { fetchChats, activeChat, joinGroupViaInvite } = useChatStore();
+    const { user } = useAuthStore();
+    const { myStatuses, statuses, fetchStatuses, isLoading: isLoadingStatuses } = useStatusStore();
     const [profileView, setProfileView] = useState(null);
     const [showSidebar, setShowSidebar] = useState(true);
     const [handledInviteCode, setHandledInviteCode] = useState('');
+    const [workspaceView, setWorkspaceView] = useState('chats');
+    const [showStatusComposer, setShowStatusComposer] = useState(false);
+    const [activeStatusUserId, setActiveStatusUserId] = useState(null);
+    const [isOwnStatusGroup, setIsOwnStatusGroup] = useState(false);
     const navigate = useNavigate();
     const { code: inviteCode } = useParams();
 
+    const activeStatusGroup = useMemo(() => {
+        if (!activeStatusUserId) return null;
+        return isOwnStatusGroup
+            ? myStatuses
+            : (Array.isArray(statuses) ? statuses.find((group) => group?.user?._id === activeStatusUserId) : null) || null;
+    }, [activeStatusUserId, isOwnStatusGroup, myStatuses, statuses]);
+
     useEffect(() => {
         fetchChats();
-    }, []);
+        fetchStatuses();
+    }, [fetchChats, fetchStatuses]);
 
     useEffect(() => {
         if (!inviteCode || handledInviteCode === inviteCode) return;
@@ -36,14 +55,33 @@ export default function Chat() {
 
     // On mobile, hide sidebar when chat is active
     useEffect(() => {
-        if (activeChat && window.innerWidth < 768) {
+        if (activeChat && typeof window !== 'undefined' && window.innerWidth < 768) {
             setShowSidebar(false);
+        }
+        if (activeChat) {
+            setWorkspaceView('chats');
         }
     }, [activeChat]);
 
     const handleBack = () => {
         setShowSidebar(true);
         useChatStore.getState().setActiveChat(null);
+    };
+    const handleOpenStatusPage = (shouldOpen = true) => {
+        setWorkspaceView(shouldOpen ? 'status' : 'chats');
+        if (typeof window !== 'undefined' && window.innerWidth < 768 && shouldOpen) {
+            setShowSidebar(false);
+        }
+        if (!shouldOpen && typeof window !== 'undefined' && window.innerWidth < 768 && !activeChat) {
+            setShowSidebar(true);
+        }
+    };
+    const handleOpenStatusGroup = (group, isOwn = false) => {
+        setActiveStatusUserId(group?.user?._id || null);
+        setIsOwnStatusGroup(isOwn);
+    };
+    const handleStatusBack = () => {
+        setShowSidebar(true);
     };
 
     return (
@@ -60,7 +98,12 @@ export default function Chat() {
             {/* Sidebar */}
             <div className={`${showSidebar ? 'flex' : 'hidden'} md:flex w-full md:w-[360px] lg:w-[420px] xl:w-[448px] flex-shrink-0 min-w-0 min-h-0 p-1.5 sm:p-2 md:p-3 z-10`}>
                 <ErrorBoundary>
-                    <Sidebar onProfileClick={() => setProfileView({ mode: 'self' })} />
+                    <Sidebar
+                        onProfileClick={() => setProfileView({ mode: 'self' })}
+                        onOpenStatusPage={handleOpenStatusPage}
+                        onCreateStatus={() => setShowStatusComposer(true)}
+                        onOpenStatusGroup={handleOpenStatusGroup}
+                    />
                 </ErrorBoundary>
             </div>
 
@@ -68,7 +111,20 @@ export default function Chat() {
 
             {/* Main Chat Area */}
             <div className={`${!showSidebar || activeChat ? 'flex' : 'hidden'} md:flex flex-1 flex-col min-w-0 min-h-0 p-1.5 sm:p-2 md:p-3 md:pl-0 z-10`}>
-                {activeChat ? (
+                {workspaceView === 'status' ? (
+                    <ErrorBoundary>
+                        <StatusPage
+                            user={user}
+                            myStatuses={myStatuses}
+                            statuses={statuses}
+                            isLoading={isLoadingStatuses}
+                            onCreate={() => setShowStatusComposer(true)}
+                            onOpenGroup={handleOpenStatusGroup}
+                            onRefresh={() => fetchStatuses()}
+                            onBack={handleStatusBack}
+                        />
+                    </ErrorBoundary>
+                ) : activeChat ? (
                     <ErrorBoundary>
                         <MessageArea
                             onBack={handleBack}
@@ -104,6 +160,18 @@ export default function Chat() {
                     chat={profileView.chat || null}
                     user={profileView.user || null}
                     onClose={() => setProfileView(null)}
+                />
+            )}
+
+            {showStatusComposer && (
+                <StatusComposerModal onClose={() => setShowStatusComposer(false)} />
+            )}
+
+            {activeStatusGroup && (
+                <StatusViewer
+                    group={activeStatusGroup}
+                    isOwn={isOwnStatusGroup}
+                    onClose={() => setActiveStatusUserId(null)}
                 />
             )}
         </div>

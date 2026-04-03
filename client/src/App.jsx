@@ -10,14 +10,41 @@ import useThemeStore from './store/useThemeStore';
 import useSocket from './hooks/useSocket';
 import { applyChatThemePreset, DEFAULT_CHAT_THEME } from './utils/themePresets';
 
-const Login = lazy(() => import('./pages/Login'));
-const Signup = lazy(() => import('./pages/Signup'));
-const VerifyOTP = lazy(() => import('./pages/VerifyOTP'));
-const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
-const Chat = lazy(() => import('./pages/Chat'));
-const ManageSessions = lazy(() => import('./pages/ManageSessions'));
-const VideoCall = lazy(() => import('./components/call/VideoCall'));
-const IncomingCall = lazy(() => import('./components/call/IncomingCall'));
+const lazyWithRetry = (importer, retryKey) => lazy(async () => {
+    try {
+        const module = await importer();
+        if (typeof window !== 'undefined') {
+            window.sessionStorage.removeItem(retryKey);
+        }
+        return module;
+    } catch (error) {
+        const isBrowser = typeof window !== 'undefined';
+        const hasRetried = isBrowser && window.sessionStorage.getItem(retryKey) === '1';
+        const message = `${error?.message || ''}`.toLowerCase();
+        const isChunkError =
+            message.includes('failed to fetch dynamically imported module')
+            || message.includes('importing a module script failed')
+            || message.includes('loading chunk')
+            || message.includes('chunkloaderror');
+
+        if (isBrowser && isChunkError && !hasRetried) {
+            window.sessionStorage.setItem(retryKey, '1');
+            window.location.reload();
+            return new Promise(() => { });
+        }
+
+        throw error;
+    }
+});
+
+const Login = lazyWithRetry(() => import('./pages/Login'), 'retry:login');
+const Signup = lazyWithRetry(() => import('./pages/Signup'), 'retry:signup');
+const VerifyOTP = lazyWithRetry(() => import('./pages/VerifyOTP'), 'retry:verify-otp');
+const ForgotPassword = lazyWithRetry(() => import('./pages/ForgotPassword'), 'retry:forgot-password');
+const Chat = lazyWithRetry(() => import('./pages/Chat'), 'retry:chat');
+const ManageSessions = lazyWithRetry(() => import('./pages/ManageSessions'), 'retry:manage-sessions');
+const VideoCall = lazyWithRetry(() => import('./components/call/VideoCall'), 'retry:video-call');
+const IncomingCall = lazyWithRetry(() => import('./components/call/IncomingCall'), 'retry:incoming-call');
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
 const AuthProvider = ({ children }) => (
@@ -119,10 +146,13 @@ export default function App() {
         localStorage.setItem('chatThemePreset', chatTheme);
     }, [chatTheme]);
 
-    // Expose theme toggle globally
-    window.__toggleTheme = toggleTheme;
-    window.__isDark = theme === 'dark';
-    window.__setChatTheme = (theme) => setChatTheme(theme || DEFAULT_CHAT_THEME);
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+
+        window.__toggleTheme = toggleTheme;
+        window.__isDark = theme === 'dark';
+        window.__setChatTheme = (nextTheme) => setChatTheme(nextTheme || DEFAULT_CHAT_THEME);
+    }, [theme, toggleTheme]);
 
     return (
         <AuthProvider>

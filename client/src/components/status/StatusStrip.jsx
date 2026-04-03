@@ -28,7 +28,9 @@ const StatusAvatar = ({ user, hasUnviewed, onClick, label }) => (
     </button>
 );
 
-export default function StatusStrip({ user, myStatuses, statuses, isLoading, onCreate, onOpenGroup }) {
+export default function StatusStrip({ user, myStatuses, statuses, isLoading, onCreate, onOpenGroup, onOpenPage }) {
+    const safeStatuses = Array.isArray(statuses) ? statuses.filter((group) => group?.user?._id) : [];
+
     return (
         <div className="px-3 sm:px-4 pb-4 flex-shrink-0">
             <div className="glass-card rounded-3xl p-3 sm:p-3.5">
@@ -42,9 +44,16 @@ export default function StatusStrip({ user, myStatuses, statuses, isLoading, onC
                             <p className="text-[11px] opacity-45">Share moments that vanish in 24h</p>
                         </div>
                     </div>
-                    <button onClick={onCreate} className="p-2 rounded-xl hover:bg-white/5" title="Create status">
-                        <Plus className="w-4 h-4 opacity-65" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                        {onOpenPage && (
+                            <button onClick={onOpenPage} className="px-3 py-1.5 rounded-xl hover:bg-white/5 text-[11px] font-semibold opacity-70" title="Open status page">
+                                Open
+                            </button>
+                        )}
+                        <button onClick={onCreate} className="p-2 rounded-xl hover:bg-white/5" title="Create status">
+                            <Plus className="w-4 h-4 opacity-65" />
+                        </button>
+                    </div>
                 </div>
 
                 <div className="flex gap-3 overflow-x-auto pb-1">
@@ -67,7 +76,7 @@ export default function StatusStrip({ user, myStatuses, statuses, isLoading, onC
                         <div className="flex items-center px-3 text-xs opacity-50">Loading...</div>
                     )}
 
-                    {statuses.map((group) => (
+                    {safeStatuses.map((group) => (
                         <StatusAvatar
                             key={group.user._id}
                             user={{ ...group.user, latestAt: group.latestAt }}
@@ -76,7 +85,7 @@ export default function StatusStrip({ user, myStatuses, statuses, isLoading, onC
                         />
                     ))}
 
-                    {!isLoading && statuses.length === 0 && (
+                    {!isLoading && safeStatuses.length === 0 && (
                         <div className="flex items-center px-3 text-xs opacity-45">
                             No recent statuses from your contacts yet
                         </div>

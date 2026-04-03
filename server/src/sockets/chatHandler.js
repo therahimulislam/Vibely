@@ -4,6 +4,7 @@ const Message = require('../models/Message');
 const Chat = require('../models/Chat');
 const { sanitizeMessageForViewer } = require('../utils/messageVisibility');
 const { ensureCanPostInGroup, getMessageExpiryForChat } = require('../utils/chatRules');
+const { canEditMessage, markMessagesAsSeenForReader } = require('../utils/messageReadState');
 
 module.exports = (io, socket, onlineUsers) => {
     const senderFields = 'name avatar username';
@@ -170,14 +171,11 @@ module.exports = (io, socket, onlineUsers) => {
             const chat = await getChatForUser(chatId);
             if (!chat) return;
 
-            await Message.updateMany(
-                {
-                    chatId,
-                    senderId,
-                    status: { $ne: 'seen' },
-                },
-                { status: 'seen' }
-            );
+            await markMessagesAsSeenForReader({
+                chatId,
+                readerId: socket.userId,
+                senderId: senderId || null,
+            });
 
             chat.unreadCount.set(socket.userId, 0);
             await chat.save();
@@ -280,14 +278,20 @@ module.exports = (io, socket, onlineUsers) => {
             const chat = await getChatForUser(message.chatId);
             if (!chat) return;
 
-            const fifteenMinutes = 15 * 60 * 1000;
-            if (Date.now() - message.createdAt.getTime() > fifteenMinutes) {
+            if (!canEditMessage(message)) {
                 socket.emit('messageError', { error: 'Can only edit messages within 15 minutes' });
                 return;
             }
 
-            message.text = typeof text === 'string' ? text.trim() : '';
+            const nextText = typeof text === 'string' ? text.trim() : '';
+            if (!nextText) {
+                socket.emit('messageError', { error: 'Edited message cannot be empty' });
+                return;
+            }
+
+            message.text = nextText;
             message.isEdited = true;
+            message.editedAt = new Date();
             await message.save();
 
             const populated = await populateMessage(messageId);

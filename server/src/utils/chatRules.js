@@ -7,7 +7,44 @@ const DISAPPEARING_DURATION_OPTIONS_HOURS = [0, 24, 168, 2160];
 const SLOW_MODE_OPTIONS_SECONDS = [0, 15, 30, 60, 300, 900, 3600];
 
 const sameId = (left, right) => String(left || '') === String(right || '');
-const isGroupAdmin = (chat, userId) => sameId(chat?.groupAdmin?._id || chat?.groupAdmin, userId);
+const getGroupOwnerId = (chat) => chat?.groupOwner?._id || chat?.groupOwner || chat?.groupAdmin?._id || chat?.groupAdmin || null;
+const getGroupAdminIds = (chat) => {
+    const explicitAdmins = Array.isArray(chat?.groupAdmins) ? chat.groupAdmins : [];
+    const ownerId = getGroupOwnerId(chat);
+    const normalized = explicitAdmins
+        .map((entry) => entry?._id || entry)
+        .filter(Boolean)
+        .map((entry) => `${entry}`);
+
+    if (ownerId && !normalized.some((entry) => sameId(entry, ownerId))) {
+        normalized.push(`${ownerId}`);
+    }
+
+    if (!normalized.length && chat?.groupAdmin) {
+        normalized.push(`${chat.groupAdmin?._id || chat.groupAdmin}`);
+    }
+
+    return Array.from(new Set(normalized));
+};
+const isGroupAdmin = (chat, userId) => getGroupAdminIds(chat).some((adminId) => sameId(adminId, userId));
+const isGroupOwner = (chat, userId) => sameId(getGroupOwnerId(chat), userId);
+const syncGroupRoleState = (chat) => {
+    if (!chat?.isGroup) {
+        return { ownerId: null, adminIds: [] };
+    }
+
+    const ownerId = getGroupOwnerId(chat);
+    const adminIds = getGroupAdminIds(chat);
+
+    if (ownerId) {
+        chat.groupOwner = ownerId;
+        chat.groupAdmin = ownerId;
+    }
+
+    chat.groupAdmins = adminIds;
+
+    return { ownerId, adminIds };
+};
 
 const getMessageExpiryForChat = (chat, createdAt = new Date()) => {
     const hours = Number(chat?.disappearingMessages?.durationHours || 0);
@@ -48,7 +85,7 @@ const ensureGroupAdmin = (chat, userId) => {
     }
 
     if (!isGroupAdmin(chat, userId)) {
-        throw Object.assign(new Error('Only the group admin can do that'), { statusCode: 403 });
+        throw Object.assign(new Error('Only group admins can do that'), { statusCode: 403 });
     }
 };
 
@@ -95,7 +132,11 @@ module.exports = {
     DISAPPEARING_DURATION_OPTIONS_HOURS,
     SLOW_MODE_OPTIONS_SECONDS,
     sameId,
+    getGroupOwnerId,
+    getGroupAdminIds,
     isGroupAdmin,
+    isGroupOwner,
+    syncGroupRoleState,
     getMessageExpiryForChat,
     normalizeGroupSettings,
     normalizeDisappearingMessages,

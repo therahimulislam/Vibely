@@ -138,7 +138,12 @@ const bindSocketListeners = () => {
     });
 
     socketInstance.on('receiveMessage', ({ message, chatId }) => {
+        const chatStore = useChatStore.getState();
+        const knownChat = (chatStore.chats || []).some((chat) => sameId(chat._id, chatId));
         useChatStore.getState().addMessage(message);
+        if (!knownChat) {
+            chatStore.fetchChats().catch(() => { });
+        }
         notifyIncomingMessage({ message, chatId });
 
         if (useChatStore.getState().activeChat?._id === chatId) {
@@ -150,7 +155,12 @@ const bindSocketListeners = () => {
     });
 
     socketInstance.on('messageSent', ({ message, scheduledMessageId }) => {
-        useChatStore.getState().addMessage(message);
+        const chatStore = useChatStore.getState();
+        const knownChat = (chatStore.chats || []).some((chat) => sameId(chat._id, message.chatId));
+        chatStore.addMessage(message);
+        if (!knownChat) {
+            chatStore.fetchChats().catch(() => { });
+        }
         if (scheduledMessageId) {
             useChatStore.getState().removeScheduledMessageFromQueue(scheduledMessageId);
         }
@@ -166,6 +176,12 @@ const bindSocketListeners = () => {
 
     socketInstance.on('messagesSeen', ({ chatId }) => {
         useChatStore.getState().setMessagesSeen(chatId);
+    });
+
+    socketInstance.on('messageError', ({ error }) => {
+        if (error) {
+            toast.error(error);
+        }
     });
 
     socketInstance.on('userTyping', ({ chatId, userId }) => {

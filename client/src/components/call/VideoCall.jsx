@@ -210,7 +210,27 @@ function RemoteVideoEl({ participant }) {
             vRef.current.play().catch(() => { });
         }
     }, [participant?.stream]);
-    return <video ref={vRef} autoPlay playsInline className="w-full h-full object-cover" />;
+    return <video ref={vRef} autoPlay playsInline muted className="w-full h-full object-cover" />;
+}
+
+function RemoteAudioEl({ participant }) {
+    const audioRef = useRef(null);
+
+    useEffect(() => {
+        if (!audioRef.current) return;
+
+        if (!participant?.stream) {
+            audioRef.current.srcObject = null;
+            return;
+        }
+
+        audioRef.current.srcObject = participant.stream;
+        audioRef.current.play().catch(() => { });
+    }, [participant?.stream]);
+
+    if (!participant?.stream) return null;
+
+    return <audio ref={audioRef} autoPlay playsInline className="hidden" />;
 }
 
 /* ─── Main tile (full-screen) ─────────────────────── */
@@ -229,7 +249,7 @@ function MainTile({ participant, localVideoRef, isSwapped, isVideoCall, isVideoO
     return (
         <div className="absolute inset-0 overflow-hidden">
             {showRemote && (
-                <video ref={remoteRef} autoPlay playsInline className="absolute inset-0 w-full h-full object-cover" />
+                <video ref={remoteRef} autoPlay playsInline muted className="absolute inset-0 w-full h-full object-cover" />
             )}
             {showLocal && (
                 <video ref={localVideoRef} autoPlay playsInline muted className="absolute inset-0 w-full h-full object-cover" />
@@ -336,7 +356,7 @@ export default function VideoCall() {
 
     // Bind local video for non-swapped case
     useEffect(() => {
-        if (localVideoRef.current && localStream && !isSwapped) {
+        if (localVideoRef.current && localStream) {
             localVideoRef.current.srcObject = localStream;
             localVideoRef.current.play().catch(() => { });
         }
@@ -409,6 +429,12 @@ export default function VideoCall() {
             style={{ background: 'linear-gradient(180deg, #050810 0%, #0a0d1c 50%, #060912 100%)' }}
             onClick={resetHide}
         >
+            <div className="hidden">
+                {participantList.map((participant) => (
+                    <RemoteAudioEl key={`remote-audio-${participant.userId}`} participant={participant} />
+                ))}
+            </div>
+
             {/* Aurora atmosphere */}
             <div className="absolute inset-0 pointer-events-none overflow-hidden">
                 <div className="absolute -top-24 left-1/2 -translate-x-1/2 w-[500px] h-[500px] rounded-full blur-[130px] opacity-20"
@@ -657,7 +683,7 @@ function RemoteMultiTile({ participant, isVideoCall }) {
     return (
         <div className="absolute inset-0 overflow-hidden bg-black/40">
             {show
-                ? <video ref={vRef} autoPlay playsInline className="absolute inset-0 w-full h-full object-cover" />
+                ? <video ref={vRef} autoPlay playsInline muted className="absolute inset-0 w-full h-full object-cover" />
                 : <div className="absolute inset-0 flex items-center justify-center"
                     style={{ background: 'radial-gradient(circle at 50% 40%, rgba(124,109,255,0.18), transparent 70%)' }}>
                     <AvatarFallback name={participant?.name} className="text-2xl" />

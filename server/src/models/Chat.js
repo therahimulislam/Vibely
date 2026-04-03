@@ -89,10 +89,21 @@ const chatSchema = new mongoose.Schema(
             type: String,
             default: '',
         },
+        groupOwner: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            default: null,
+        },
         groupAdmin: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'User',
         },
+        groupAdmins: [
+            {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: 'User',
+            },
+        ],
         unreadCount: {
             type: Map,
             of: Number,

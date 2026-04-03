@@ -487,6 +487,17 @@ h1, h2, h3, h4, h5, h6 {
 }
 .animate-record-pulse { animation: recordPulse 1.2s ease-in-out infinite; }
 
+@keyframes statusProgressFill {
+  from { width: 0%; }
+  to   { width: 100%; }
+}
+.status-progress-fill {
+  width: 0%;
+  animation-name: statusProgressFill;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
 /* ─── OTP Input ──────────────────────────────────── */
 .otp-input {
   @apply w-12 h-14 text-center text-xl font-bold rounded-xl border-2 outline-none transition-all;

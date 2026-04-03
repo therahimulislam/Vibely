@@ -13,6 +13,7 @@ import MessageInput from './MessageInput';
 import TypingIndicator from './TypingIndicator';
 import { formatLastSeen } from '../../utils/formatters';
 import AvatarFallback from '../ui/AvatarFallback';
+import { getDisplayName } from '../../utils/userDisplay';
 
 export default function MessageArea({ onBack, onProfileClick }) {
     const {
@@ -27,7 +28,6 @@ export default function MessageArea({ onBack, onProfileClick }) {
         togglePin,
         toggleArchiveChat,
         deleteChat,
-        addToGroup,
         respondToRequest,
         messageSearchResults,
         isSearchingChatMessages,
@@ -64,6 +64,7 @@ export default function MessageArea({ onBack, onProfileClick }) {
     // Filter out null participants (e.g. deleted users)
     const participants = (activeChat?.participants || []).filter(p => p);
     const otherUser = participants.find((p) => p._id !== user._id);
+    const otherUserDisplayName = getDisplayName(otherUser, user);
     const isSavedMessagesChat = !!activeChat?.isSavedMessages;
 
     const chatInfo = isSavedMessagesChat ? {
@@ -80,7 +81,7 @@ export default function MessageArea({ onBack, onProfileClick }) {
         isSavedMessages: false,
         onlineStatus: `${participants.length} members`
     } : {
-        name: otherUser?.name,
+        name: otherUserDisplayName,
         avatar: otherUser?.avatar,
         isGroup: false,
         isSavedMessages: false,
@@ -94,8 +95,12 @@ export default function MessageArea({ onBack, onProfileClick }) {
     const isArchived = activeChat?.archivedBy?.includes(user._id);
     const isPendingRequest = !activeChat?.isGroup && !isSavedMessagesChat && activeChat?.requestStatus === 'pending';
     const isRequester = activeChat?.requestedBy?._id === user._id || activeChat?.requestedBy === user._id;
-    const groupAdminId = activeChat?.groupAdmin?._id || activeChat?.groupAdmin || null;
-    const isCurrentUserGroupAdmin = !!activeChat?.isGroup && `${groupAdminId}` === `${user._id}`;
+    const groupOwnerId = activeChat?.groupOwner?._id || activeChat?.groupOwner || activeChat?.groupAdmin?._id || activeChat?.groupAdmin || null;
+    const groupAdminIds = Array.from(new Set([
+        ...((activeChat?.groupAdmins || []).map((entry) => `${entry?._id || entry || ''}`).filter(Boolean)),
+        ...(groupOwnerId ? [`${groupOwnerId}`] : []),
+    ]));
+    const isCurrentUserGroupAdmin = !!activeChat?.isGroup && groupAdminIds.some((adminId) => `${adminId}` === `${user._id}`);
     const groupSettings = activeChat?.groupSettings || {};
     const disappearingMessages = activeChat?.disappearingMessages || {};
     const formatDisappearingLabel = (hours) => {
@@ -496,8 +501,7 @@ export default function MessageArea({ onBack, onProfileClick }) {
                                 {chatInfo.isGroup && isCurrentUserGroupAdmin && (
                                     <button
                                         onClick={() => {
-                                            const username = window.prompt('Enter username to add:');
-                                            if (username) addToGroup(activeChat._id, null, username);
+                                            openChatDetails();
                                             setShowMenu(false);
                                         }}
                                         className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-lg hover:bg-white/5 transition-colors"

@@ -98,6 +98,18 @@ const updateChatLastMessageOnDelete = (chat, messageId) => {
     };
 };
 
+const withUnreadCount = (chat, viewerId, unreadValue) => {
+    if (!chat || !viewerId) return chat;
+
+    return {
+        ...chat,
+        unreadCount: {
+            ...(chat.unreadCount || {}),
+            [viewerId]: Math.max(0, unreadValue),
+        },
+    };
+};
+
 const upsertChat = (chats = [], nextChat) => {
     if (!nextChat) return chats;
     const exists = chats.some((chat) => sameId(chat._id, nextChat._id));
@@ -389,10 +401,10 @@ const useChatStore = create((set, get) => ({
         try {
             const { data } = await api.post('/chats/create', { participantId });
             const hydratedChat = applyPresenceToChat(data.chat, get().onlineUsers);
-            if (data.isNew) {
-                set((state) => ({ chats: [hydratedChat, ...state.chats] }));
-            }
-            set({ activeChat: hydratedChat });
+            set((state) => ({
+                chats: upsertChat(state.chats, hydratedChat),
+                activeChat: hydratedChat,
+            }));
             await get().fetchMessages(hydratedChat._id, 1);
             return hydratedChat;
         } catch (error) {
@@ -439,25 +451,41 @@ const useChatStore = create((set, get) => ({
     // Add message (from socket or API)
     addMessage: (message) => {
         set((state) => {
+            const currentUserId = getCurrentUserId();
+            const isActiveChatMessage = sameId(state.activeChat?._id, message.chatId);
+            const senderId = message.senderId?._id || message.senderId;
+            const isOwnMessage = sameId(senderId, currentUserId);
             const existsInActiveChat = state.messages.some((m) => m._id === message._id);
             const nextMessages = state.activeChat?._id === message.chatId && !existsInActiveChat
                 ? [...state.messages, message]
                 : state.messages;
 
             const updatedChats = sortChatsByUpdatedAt(
-                state.chats.map((chat) => updateChatPreviewWithMessage(chat, message))
+                state.chats.map((chat) => {
+                    if (!sameId(chat._id, message.chatId)) {
+                        return chat;
+                    }
+
+                    const previewChat = updateChatPreviewWithMessage(chat, message);
+                    if (isOwnMessage || isActiveChatMessage) {
+                        return withUnreadCount(previewChat, currentUserId, 0);
+                    }
+
+                    const nextUnread = (chat.unreadCount?.[currentUserId] || 0) + 1;
+                    return withUnreadCount(previewChat, currentUserId, nextUnread);
+                })
             );
 
             return {
                 messages: nextMessages,
                 chats: updatedChats,
                 activeChat: state.activeChat?._id === message.chatId
-                    ? {
+                    ? withUnreadCount({
                         ...state.activeChat,
                         lastMessage: message,
                         updatedAt: message.createdAt || new Date().toISOString(),
                         archivedBy: [],
-                    }
+                    }, currentUserId, 0)
                     : state.activeChat,
                 messageSearchResults: state.messageSearchResults.map((entry) =>
                     sameId(entry._id, message._id) ? message : entry
@@ -503,6 +531,16 @@ const useChatStore = create((set, get) => ({
             return data;
         } catch (error) {
             toast.error(error.response?.data?.error || 'Failed to open protected media');
+            throw error;
+        }
+    },
+
+    fetchMessageInfo: async (messageId) => {
+        try {
+            const { data } = await api.get(`/messages/${messageId}/info`);
+            return data.messageInfo;
+        } catch (error) {
+            toast.error(error.response?.data?.error || 'Failed to load message info');
             throw error;
         }
     },
@@ -613,9 +651,50 @@ const useChatStore = create((set, get) => ({
             const { data } = await api.put('/chats/group/add', { chatId, userId, username });
             set((state) => replaceChatEverywhere(state, data.chat));
             toast.success('User added to group');
+            return data.chat;
         } catch (error) {
             console.error('Failed to add to group:', error);
             toast.error(error.response?.data?.error || 'Failed to add user');
+            throw error;
+        }
+    },
+
+    removeFromGroup: async (chatId, userId) => {
+        try {
+            const { data } = await api.delete(`/chats/${chatId}/members/${userId}`);
+            set((state) => replaceChatEverywhere(state, data.chat));
+            toast.success('Member removed from group');
+            return data.chat;
+        } catch (error) {
+            toast.error(error.response?.data?.error || 'Failed to remove member');
+            throw error;
+        }
+    },
+
+    updateGroupMemberRole: async (chatId, userId, role) => {
+        try {
+            const { data } = await api.patch(`/chats/${chatId}/members/${userId}/role`, { role });
+            set((state) => replaceChatEverywhere(state, data.chat));
+            toast.success(role === 'admin' ? 'Member promoted to admin' : 'Admin changed to member');
+            return data.chat;
+        } catch (error) {
+            toast.error(error.response?.data?.error || 'Failed to update member role');
+            throw error;
+        }
+    },
+
+    updateGroupProfile: async (chatId, payload) => {
+        try {
+            const config = payload instanceof FormData
+                ? { headers: { 'Content-Type': 'multipart/form-data' } }
+                : undefined;
+            const { data } = await api.patch(`/chats/${chatId}/profile`, payload, config);
+            set((state) => replaceChatEverywhere(state, data.chat));
+            toast.success('Group updated');
+            return data.chat;
+        } catch (error) {
+            toast.error(error.response?.data?.error || 'Failed to update group');
+            throw error;
         }
     },
 
@@ -636,7 +715,7 @@ const useChatStore = create((set, get) => ({
             const { data } = await api.post(`/chats/${chatId}/invite-links`);
             set((state) => replaceChatEverywhere(state, data.chat));
             toast.success('Invite link created');
-            return data.inviteLink;
+            return data;
         } catch (error) {
             toast.error(error.response?.data?.error || 'Failed to create invite link');
             throw error;

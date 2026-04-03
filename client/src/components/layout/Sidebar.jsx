@@ -1,5 +1,5 @@
 // client/src/components/layout/Sidebar.jsx
-// Left sidebar with header, search, chat list, and new chat
+// Left sidebar with header, search, chat list, and status shortcuts
 
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
@@ -10,14 +10,18 @@ import useStatusStore from '../../store/useStatusStore';
 import useReminderStore from '../../store/useReminderStore';
 import ChatList from '../chat/ChatList';
 import StatusStrip from '../status/StatusStrip';
-import StatusComposerModal from '../status/StatusComposerModal';
-import StatusViewer from '../status/StatusViewer';
 import ThemeToggle from './ThemeToggle';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 import AvatarFallback from '../ui/AvatarFallback';
+import { getDisplayName } from '../../utils/userDisplay';
 
-export default function Sidebar({ onProfileClick }) {
+export default function Sidebar({
+    onProfileClick,
+    onOpenStatusPage,
+    onCreateStatus,
+    onOpenStatusGroup,
+}) {
     const { user, logout, addContact, removeContact, saveChatFolders } = useAuthStore();
     const {
         chats,
@@ -43,10 +47,9 @@ export default function Sidebar({ onProfileClick }) {
     const [showFolderManager, setShowFolderManager] = useState(false);
     const [showCollections, setShowCollections] = useState(false);
     const [showReminders, setShowReminders] = useState(false);
-    const [showStatusComposer, setShowStatusComposer] = useState(false);
-    const [isOwnStatusGroup, setIsOwnStatusGroup] = useState(false);
-    const [activeStatusUserId, setActiveStatusUserId] = useState(null);
     const [groupName, setGroupName] = useState('');
+    const [groupAvatarFile, setGroupAvatarFile] = useState(null);
+    const [groupAvatarPreview, setGroupAvatarPreview] = useState('');
     const [selectedUsers, setSelectedUsers] = useState([]);
     const [searchUsers, setSearchUsers] = useState([]);
     const [userSearchQuery, setUserSearchQuery] = useState('');
@@ -60,16 +63,27 @@ export default function Sidebar({ onProfileClick }) {
     const [newFolderColor, setNewFolderColor] = useState('#6f6bff');
     const [folderDraftName, setFolderDraftName] = useState('');
     const [folderDraftColor, setFolderDraftColor] = useState('#6f6bff');
-    const chatFolders = user?.preferences?.chatFolders || [];
+    const safeChats = Array.isArray(chats) ? chats : [];
+    const safeStatuses = Array.isArray(statuses) ? statuses : [];
+    const safeSearchUsers = Array.isArray(searchUsers) ? searchUsers : [];
+    const safeBookmarkCollections = Array.isArray(bookmarkCollections) ? bookmarkCollections : [];
+    const safeReminders = Array.isArray(reminders) ? reminders : [];
+    const chatFolders = Array.isArray(user?.preferences?.chatFolders) ? user.preferences.chatFolders : [];
+    const inboxConversationCount = safeChats.filter((chat) => !chat?.isSavedMessages).length;
     const folderColorOptions = ['#6f6bff', '#12b981', '#f97316', '#06b6d4', '#ec4899', '#eab308'];
     const activeFolder = chatFolders.find((folder) => folder.folderId === activeFolderId) || null;
     const extractInviteCode = (value = '') =>
         `${value}`.trim().replace(/\/+$/, '').split('/').filter(Boolean).pop() || '';
     const closeCreationPanels = () => {
+        if (groupAvatarPreview) {
+            URL.revokeObjectURL(groupAvatarPreview);
+        }
         setShowNewChat(false);
         setShowNewGroup(false);
         setShowJoinGroup(false);
         setGroupName('');
+        setGroupAvatarFile(null);
+        setGroupAvatarPreview('');
         setSelectedUsers([]);
         setUserSearchQuery('');
         setInviteCodeInput('');
@@ -80,7 +94,7 @@ export default function Sidebar({ onProfileClick }) {
         if (chat.isSavedMessages) return 'Saved Messages';
         if (chat.isGroup) return chat.groupName || 'Group Chat';
         const participant = (chat.participants || []).filter(Boolean).find((entry) => entry._id !== user?._id);
-        return participant?.name || 'Direct Chat';
+        return getDisplayName(participant, user) || 'Direct Chat';
     };
     const getBookmarkedMessagePreview = (message) => {
         if (!message) return 'Saved message';
@@ -100,10 +114,6 @@ export default function Sidebar({ onProfileClick }) {
             toast.error(error);
         }
     }, [error]);
-
-    useEffect(() => {
-        fetchStatuses();
-    }, [fetchStatuses]);
 
     useEffect(() => {
         fetchReminders().catch(() => { });
@@ -135,7 +145,7 @@ export default function Sidebar({ onProfileClick }) {
     useEffect(() => {
         if (!userSearchQuery.trim()) {
             const recentUsersMap = new Map();
-            chats.forEach(chat => {
+            safeChats.forEach(chat => {
                 if (!chat.isGroup && !chat.isSavedMessages) {
                     chat.participants?.forEach(p => {
                         if (p && typeof p === 'object' && p._id && String(p._id) !== String(user?._id)) {
@@ -162,7 +172,7 @@ export default function Sidebar({ onProfileClick }) {
         }, 300);
 
         return () => clearTimeout(timer);
-    }, [userSearchQuery, chats, user?._id]);
+    }, [userSearchQuery, safeChats, user?._id]);
 
     useEffect(() => {
         if (!showJoinGroup) {
@@ -193,6 +203,12 @@ export default function Sidebar({ onProfileClick }) {
         return () => clearTimeout(timer);
     }, [showJoinGroup, inviteCodeInput, getInviteInfo]);
 
+    useEffect(() => () => {
+        if (groupAvatarPreview) {
+            URL.revokeObjectURL(groupAvatarPreview);
+        }
+    }, [groupAvatarPreview]);
+
     const handleStartChat = async (userId) => {
         try {
             await createChat(userId);
@@ -214,9 +230,15 @@ export default function Sidebar({ onProfileClick }) {
         }
 
         try {
-            await api.post('/chats/group', {
-                name: groupName,
-                participants: selectedUsers.map(u => u._id)
+            const payload = new FormData();
+            payload.append('name', groupName);
+            selectedUsers.forEach((member) => payload.append('participants[]', member._id));
+            if (groupAvatarFile) {
+                payload.append('groupAvatar', groupAvatarFile);
+            }
+
+            await api.post('/chats/group', payload, {
+                headers: { 'Content-Type': 'multipart/form-data' },
             });
             closeCreationPanels();
             fetchChats(); // Refresh list
@@ -225,6 +247,17 @@ export default function Sidebar({ onProfileClick }) {
             console.error(error);
             toast.error('Failed to create group');
         }
+    };
+    const handleGroupAvatarPicked = (event) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        if (groupAvatarPreview) {
+            URL.revokeObjectURL(groupAvatarPreview);
+        }
+
+        setGroupAvatarFile(file);
+        setGroupAvatarPreview(URL.createObjectURL(file));
     };
     const handleJoinGroup = async () => {
         const inviteCode = extractInviteCode(inviteCodeInput);
@@ -253,22 +286,32 @@ export default function Sidebar({ onProfileClick }) {
         try {
             if (targetUser.isContact) {
                 await removeContact(targetUser._id);
-                setSearchUsers((prev) => prev.map((entry) => entry._id === targetUser._id ? { ...entry, isContact: false } : entry));
+                setSearchUsers((prev) => prev.map((entry) => entry._id === targetUser._id ? {
+                    ...entry,
+                    isContact: false,
+                    preferredName: '',
+                    displayName: entry.name,
+                } : entry));
                 toast.success('Contact removed');
             } else {
-                await addContact(targetUser._id);
-                setSearchUsers((prev) => prev.map((entry) => entry._id === targetUser._id ? { ...entry, isContact: true } : entry));
+                const preferredName = window.prompt('Save contact as', getDisplayName(targetUser, user) || targetUser.name || '');
+                if (preferredName === null) {
+                    return;
+                }
+                await addContact(targetUser._id, preferredName);
+                const nextDisplayName = preferredName.trim() || targetUser.name;
+                setSearchUsers((prev) => prev.map((entry) => entry._id === targetUser._id ? {
+                    ...entry,
+                    isContact: true,
+                    preferredName: nextDisplayName,
+                    displayName: nextDisplayName,
+                } : entry));
                 toast.success('Contact saved');
             }
             fetchStatuses();
         } catch (error) {
             toast.error(error.message);
         }
-    };
-
-    const handleOpenStatusGroup = (group, isOwn = false) => {
-        setActiveStatusUserId(group?.user?._id || null);
-        setIsOwnStatusGroup(isOwn);
     };
 
     const handleOpenCollections = async () => {
@@ -284,24 +327,26 @@ export default function Sidebar({ onProfileClick }) {
     const handleOpenBookmarkedChat = async (message) => {
         const chatId = message?.chatId?._id || message?.chatId;
         const targetChat = (chats || []).find((entry) => `${entry._id}` === `${chatId}`);
-        if (!targetChat) {
+        const fallbackChat = safeChats.find((entry) => `${entry._id}` === `${chatId}`);
+        if (!targetChat && !fallbackChat) {
             toast.error('Open this chat from your inbox first');
             return;
         }
 
-        await setActiveChat(targetChat);
+        await setActiveChat(targetChat || fallbackChat);
         setShowCollections(false);
     };
 
     const handleOpenReminderChat = async (reminder) => {
         const chatId = reminder?.messageId?.chatId?._id || reminder?.messageId?.chatId;
         const targetChat = (chats || []).find((entry) => `${entry._id}` === `${chatId}`);
-        if (!targetChat) {
+        const fallbackChat = safeChats.find((entry) => `${entry._id}` === `${chatId}`);
+        if (!targetChat && !fallbackChat) {
             toast.error('Open this chat from your inbox first');
             return;
         }
 
-        await setActiveChat(targetChat);
+        await setActiveChat(targetChat || fallbackChat);
         setShowReminders(false);
     };
 
@@ -401,12 +446,6 @@ export default function Sidebar({ onProfileClick }) {
         await persistFolders(nextFolders, 'Folder membership updated');
     };
 
-    const activeStatusGroup = activeStatusUserId
-        ? (isOwnStatusGroup
-            ? myStatuses
-            : statuses.find((group) => group.user._id === activeStatusUserId) || null)
-        : null;
-
     return (
         <>
         <div className="w-full h-full min-w-0 flex flex-col glass-panel surface-elevated overflow-hidden">
@@ -464,8 +503,17 @@ export default function Sidebar({ onProfileClick }) {
 
             {/* Scrollable upper content: search + status strip + new chat panel */}
             <div className="flex-shrink min-h-0 overflow-y-auto">
-            {/* Search chats */}
             <div className="px-3.5 sm:px-5 py-3.5 sm:py-4 space-y-4">
+                <StatusStrip
+                    user={user}
+                    myStatuses={myStatuses}
+                    statuses={safeStatuses}
+                    isLoading={isLoadingStatuses}
+                    onCreate={onCreateStatus}
+                    onOpenGroup={onOpenStatusGroup}
+                    onOpenPage={() => onOpenStatusPage?.(true)}
+                />
+
                 <div className="surface-muted p-3 sm:p-3.5">
                     <div className="flex items-center justify-between gap-3 mb-3">
                         <div>
@@ -641,7 +689,7 @@ export default function Sidebar({ onProfileClick }) {
                                         <div>
                                             <p className="text-xs opacity-45 mb-2">Assign chats</p>
                                             <div className="max-h-48 overflow-y-auto space-y-2">
-                                                {(chats || []).map((chat) => {
+                                                {safeChats.map((chat) => {
                                                     const isAssigned = (activeFolder.chatIds || []).some((id) => `${id}` === `${chat._id}`);
                                                     return (
                                                         <button
@@ -662,7 +710,7 @@ export default function Sidebar({ onProfileClick }) {
                                                         </button>
                                                     );
                                                 })}
-                                                {(chats || []).length === 0 && (
+                                                {safeChats.length === 0 && (
                                                     <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-4 text-sm opacity-55">
                                                         Chats will appear here once you have conversations to organize.
                                                     </div>
@@ -675,6 +723,19 @@ export default function Sidebar({ onProfileClick }) {
                         )}
                     </div>
                 )}
+
+                <div className="glass-card rounded-[24px] p-2 sm:p-2.5 animate-slide-up">
+                    <div className="px-2.5 pt-2 pb-1 flex items-center justify-between gap-3">
+                        <div>
+                            <p className="text-[11px] uppercase tracking-[0.24em] opacity-35 mb-1">Messages</p>
+                            <h3 className="text-sm font-semibold leading-none">People and Groups</h3>
+                        </div>
+                        <span className="badge-pill">{inboxConversationCount}</span>
+                    </div>
+                    <div className="max-h-[48dvh] overflow-y-auto pr-1">
+                        <ChatList filterMode={chatFilter} showSavedMessages={false} />
+                    </div>
+                </div>
 
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
                     <button
@@ -707,7 +768,7 @@ export default function Sidebar({ onProfileClick }) {
                                 <p className="text-xs opacity-45 truncate">Organized bookmarks for references, ideas, and important threads</p>
                             </div>
                         </div>
-                        <span className="badge-pill">{bookmarkCollections.length}</span>
+                        <span className="badge-pill">{safeBookmarkCollections.length}</span>
                     </button>
 
                     <button
@@ -723,19 +784,10 @@ export default function Sidebar({ onProfileClick }) {
                                 <p className="text-xs opacity-45 truncate">Follow-ups, revisit later, and time-based nudges</p>
                             </div>
                         </div>
-                        <span className="badge-pill">{reminders.length}</span>
+                        <span className="badge-pill">{safeReminders.length}</span>
                     </button>
                 </div>
             </div>
-
-            <StatusStrip
-                user={user}
-                myStatuses={myStatuses}
-                statuses={statuses}
-                isLoading={isLoadingStatuses}
-                onCreate={() => setShowStatusComposer(true)}
-                onOpenGroup={handleOpenStatusGroup}
-            />
 
             </div> {/* end scrollable upper content */}
 
@@ -809,7 +861,7 @@ export default function Sidebar({ onProfileClick }) {
                                                 <p className="text-sm font-semibold truncate">{invitePreview.groupName}</p>
                                                 <p className="text-xs opacity-45 truncate">
                                                     {invitePreview.memberCount} members
-                                                    {invitePreview.groupAdmin?.name ? ` • Admin: ${invitePreview.groupAdmin.name}` : ''}
+                                                    {invitePreview.groupAdmin?.name ? ` • Owner: ${invitePreview.groupAdmin.name}` : ''}
                                                 </p>
                                             </div>
                                         </div>
@@ -837,6 +889,25 @@ export default function Sidebar({ onProfileClick }) {
                             <>
                         {showNewGroup && (
                             <div className="mb-3">
+                                <label className="text-xs opacity-50 block mb-2">Group Icon</label>
+                                <div className="flex items-center gap-3 mb-3">
+                                    <div className="w-14 h-14 rounded-full overflow-hidden ring-1 ring-white/10 flex-shrink-0">
+                                        {groupAvatarPreview ? (
+                                            <img src={groupAvatarPreview} alt="Group icon preview" className="w-full h-full object-cover" />
+                                        ) : (
+                                            <AvatarFallback name={groupName || 'Group'} className="text-base" variant="group" icon={<Users className="w-5 h-5" />} />
+                                        )}
+                                    </div>
+                                    <label className="btn-glass px-3 py-2 text-sm cursor-pointer">
+                                        <span className="flex items-center gap-2"><Plus className="w-4 h-4" /> {groupAvatarFile ? 'Change Icon' : 'Add Icon'}</span>
+                                        <input
+                                            type="file"
+                                            accept="image/*"
+                                            onChange={handleGroupAvatarPicked}
+                                            className="hidden"
+                                        />
+                                    </label>
+                                </div>
                                 <label className="text-xs opacity-50 block mb-1">Group Name</label>
                                 <input
                                     type="text"
@@ -860,7 +931,7 @@ export default function Sidebar({ onProfileClick }) {
                             type="text"
                             value={userSearchQuery}
                             onChange={(e) => setUserSearchQuery(e.target.value)}
-                            placeholder="Search by username..."
+                            placeholder="Search by name or username..."
                             className="input-glass py-2 text-sm mb-2"
                             autoFocus
                         />
@@ -870,8 +941,9 @@ export default function Sidebar({ onProfileClick }) {
                         )}
 
                         <div className="max-h-56 overflow-y-auto space-y-1">
-                            {searchUsers.map((u) => {
+                            {safeSearchUsers.map((u) => {
                                 const isSelected = selectedUsers.find(sel => sel._id === u._id);
+                                const displayName = getDisplayName(u, user);
                                 return (
                                     <div
                                         key={u._id}
@@ -895,7 +967,10 @@ export default function Sidebar({ onProfileClick }) {
                                                 )}
                                             </div>
                                             <div className="min-w-0">
-                                                <p className="text-sm font-medium truncate">{u.name}</p>
+                                                <p className="text-sm font-medium truncate">{displayName}</p>
+                                                {displayName !== u.name && (
+                                                    <p className="text-[11px] opacity-35 truncate">{u.name}</p>
+                                                )}
                                                 <p className="text-xs opacity-40 truncate">@{u.username}</p>
                                             </div>
                                         </button>
@@ -928,24 +1003,6 @@ export default function Sidebar({ onProfileClick }) {
                 </div>
             )}
 
-            {/* Chat List */}
-            <div className="flex-1 overflow-y-auto px-1.5 sm:px-2 pb-3">
-                <ChatList filterMode={chatFilter} />
-            </div>
-
-            {showStatusComposer && (
-                <StatusComposerModal onClose={() => setShowStatusComposer(false)} />
-            )}
-
-            {activeStatusGroup && createPortal(
-                <StatusViewer
-                    group={activeStatusGroup}
-                    isOwn={isOwnStatusGroup}
-                    onClose={() => setActiveStatusUserId(null)}
-                />,
-                document.body
-            )}
-
             {showCollections && (
                 <div className="fixed inset-0 z-40 flex items-center justify-center p-4" onClick={() => setShowCollections(false)}>
                     <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
@@ -965,7 +1022,7 @@ export default function Sidebar({ onProfileClick }) {
 
                         <div className="grid grid-cols-1 lg:grid-cols-[220px_1fr] gap-4 max-h-[70dvh]">
                             <div className="space-y-2 overflow-y-auto pr-1">
-                                {bookmarkCollections.map((collection) => (
+                                {safeBookmarkCollections.map((collection) => (
                                     <div key={collection._id} className="rounded-2xl border border-white/8 bg-white/5 px-3 py-3">
                                         <div className="flex items-center gap-2">
                                             <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: collection.color || '#6f6bff' }} />
@@ -976,7 +1033,7 @@ export default function Sidebar({ onProfileClick }) {
                                         </p>
                                     </div>
                                 ))}
-                                {!isLoadingBookmarkCollections && bookmarkCollections.length === 0 && (
+                                {!isLoadingBookmarkCollections && safeBookmarkCollections.length === 0 && (
                                     <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-5 text-sm opacity-55">
                                         Save a message into a collection to see it here.
                                     </div>
@@ -989,7 +1046,7 @@ export default function Sidebar({ onProfileClick }) {
                                         <div className="w-6 h-6 border-2 border-primary-400/30 border-t-primary-400 rounded-full animate-spin" />
                                     </div>
                                 ) : (
-                                    bookmarkCollections.map((collection) => (
+                                    safeBookmarkCollections.map((collection) => (
                                         <section key={collection._id} className="glass-card rounded-3xl p-4 sm:p-5">
                                             <div className="flex items-center gap-2 mb-3">
                                                 <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: collection.color || '#6f6bff' }} />
@@ -1052,8 +1109,8 @@ export default function Sidebar({ onProfileClick }) {
                                 <div className="flex items-center justify-center py-12">
                                     <div className="w-6 h-6 border-2 border-primary-400/30 border-t-primary-400 rounded-full animate-spin" />
                                 </div>
-                            ) : reminders.length > 0 ? (
-                                reminders.map((reminder) => (
+                            ) : safeReminders.length > 0 ? (
+                                safeReminders.map((reminder) => (
                                     <div key={reminder._id} className="rounded-2xl border border-white/8 bg-white/5 px-4 py-4">
                                         <div className="flex items-start justify-between gap-3">
                                             <button
@@ -1102,9 +1159,9 @@ export default function Sidebar({ onProfileClick }) {
         </div>
 
             {/* Logout Confirmation Modal */}
-            {showLogoutConfirm && (
+            {showLogoutConfirm && createPortal(
                 <div
-                    className="fixed inset-0 z-[999] flex items-center justify-center p-4"
+                    className="fixed inset-0 z-[10000] flex items-center justify-center p-4 sm:p-6"
                     style={{ backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', backgroundColor: 'rgba(0,0,0,0.55)' }}
                     onClick={() => setShowLogoutConfirm(false)}
                 >
@@ -1143,7 +1200,8 @@ export default function Sidebar({ onProfileClick }) {
                             </button>
                         </div>
                     </div>
-                </div>
+                </div>,
+                document.body
             )}
         </>
     );

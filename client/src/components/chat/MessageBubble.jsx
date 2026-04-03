@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
     Bookmark, Check, CheckCheck, Clock3, Download, Edit3, EyeOff,
-    FileText, Forward, Reply, SmilePlus, Star, Trash2, X, Pin
+    FileText, Forward, Info, Reply, SmilePlus, Star, Trash2, X, Pin
 } from 'lucide-react';
 import useSocket from '../../hooks/useSocket';
 import useAuthStore from '../../store/useAuthStore';
@@ -19,6 +19,7 @@ import ViewOnceMediaViewer from './ViewOnceMediaViewer';
 import MessageContextSheet from './MessageContextSheet';
 
 const sameId = (l, r) => String(l || '') === String(r || '');
+const EDIT_WINDOW_MS = 15 * 60 * 1000;
 
 const getMessageSnippet = (msg) => {
     if (!msg) return 'Message';
@@ -30,6 +31,26 @@ const getMessageSnippet = (msg) => {
     if (msg.type === 'audio') return 'Voice message';
     if (msg.type === 'document') return msg.fileName || msg.text || 'Document';
     return msg.text || 'Message';
+};
+
+const canEditOwnMessage = (message, isOwn) => {
+    if (!isOwn || !message || message.type !== 'text' || message.isDeleted) return false;
+    const createdAt = new Date(message.createdAt).getTime();
+    if (Number.isNaN(createdAt)) return false;
+    return Date.now() - createdAt <= EDIT_WINDOW_MS;
+};
+
+const formatFullDateTime = (value) => {
+    if (!value) return 'Unavailable';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return 'Unavailable';
+    return date.toLocaleString([], {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+    });
 };
 
 // Compact emoji reaction clusters
@@ -77,6 +98,9 @@ export default function MessageBubble({ message, isOwn, otherUser, showAvatar, o
     const [newCollectionColor, setNewCollectionColor] = useState('#7c6dff');
     const [customReminderAt, setCustomReminderAt] = useState(() => formatDateTimeLocal(new Date(Date.now() + 3600000)));
     const [viewOnceViewer, setViewOnceViewer] = useState(null);
+    const [showInfoModal, setShowInfoModal] = useState(false);
+    const [messageInfo, setMessageInfo] = useState(null);
+    const [isLoadingMessageInfo, setIsLoadingMessageInfo] = useState(false);
 
     const longPressHandlers = useLongPress(() => setShowContextSheet(true), 480);
 
@@ -86,7 +110,7 @@ export default function MessageBubble({ message, isOwn, otherUser, showAvatar, o
         votePoll, setReplyingTo, toggleStarMessage, togglePinMessage,
         forwardMessage, ensureSavedMessagesChat, fetchBookmarkCollections,
         createBookmarkCollection, toggleMessageInBookmarkCollection,
-        bookmarkCollections, isLoadingBookmarkCollections, chats, openViewOnceMessage,
+        bookmarkCollections, isLoadingBookmarkCollections, chats, openViewOnceMessage, fetchMessageInfo,
     } = useChatStore();
     const { createReminder } = useReminderStore();
     const bookmarkColorOptions = ['#7c6dff', '#10b981', '#f97316', '#06b6d4', '#ec4899'];
@@ -100,11 +124,19 @@ export default function MessageBubble({ message, isOwn, otherUser, showAvatar, o
     const isViewOnceMedia = !!message.viewOnce?.enabled && ['image', 'video'].includes(message.type);
     const hasViewedViewOnce = !!message.viewOnce?.hasViewed || (message.viewOnce?.views || []).some(e => sameId(e?.userId?._id || e?.userId, user?._id));
     const viewOnceLabel = message.type === 'video' ? 'View once video' : 'View once photo';
+    const canEditMessage = canEditOwnMessage(message, isOwn);
 
     useEffect(() => {
         if (!showBookmarkModal) return;
         fetchBookmarkCollections().catch(() => {});
     }, [showBookmarkModal, fetchBookmarkCollections]);
+
+    useEffect(() => {
+        setEditText(message.text || '');
+        if (!canEditMessage) {
+            setIsEditing(false);
+        }
+    }, [message.text, canEditMessage]);
 
     const forwardTargets = useMemo(() => {
         const q = forwardQuery.trim().toLowerCase();
@@ -131,6 +163,10 @@ export default function MessageBubble({ message, isOwn, otherUser, showAvatar, o
     const handleReaction = (emoji) => { emitReaction(message._id, emoji, otherUser?._id); setShowReactions(false); };
     const handleDelete = (type = 'me') => emitDeleteMessage(message._id, message.chatId, otherUser?._id, type);
     const handleEdit = () => {
+        if (!canEditMessage) {
+            setIsEditing(false);
+            return;
+        }
         if (editText.trim() && editText !== message.text) emitEditMessage(message._id, editText, otherUser?._id);
         setIsEditing(false);
     };
@@ -160,6 +196,18 @@ export default function MessageBubble({ message, isOwn, otherUser, showAvatar, o
         if (isOwn || hasViewedViewOnce || isOpeningViewOnce) return;
         setIsOpeningViewOnce(true);
         try { const d = await openViewOnceMessage(message._id); setViewOnceViewer({ mediaUrl: d.mediaUrl, type: d.type, durationSeconds: d.durationSeconds }); } finally { setIsOpeningViewOnce(false); }
+    };
+    const handleOpenInfo = async () => {
+        setShowInfoModal(true);
+        setIsLoadingMessageInfo(true);
+        try {
+            const info = await fetchMessageInfo(message._id);
+            setMessageInfo(info);
+        } catch (error) {
+            setShowInfoModal(false);
+        } finally {
+            setIsLoadingMessageInfo(false);
+        }
     };
 
     const StatusIcon = () => {
@@ -214,7 +262,8 @@ export default function MessageBubble({ message, isOwn, otherUser, showAvatar, o
                             )}
                             <ActionBtn icon={<Bookmark className="w-3.5 h-3.5" />} title="Bookmark" onClick={() => setShowBookmarkModal(true)} />
                             <ActionBtn icon={<Clock3 className="w-3.5 h-3.5" />} title="Remind me" onClick={() => setShowReminderModal(true)} />
-                            {isOwn && message.type === 'text' && (
+                            {isOwn && <ActionBtn icon={<Info className="w-3.5 h-3.5" />} title="Info" onClick={handleOpenInfo} />}
+                            {isOwn && message.type === 'text' && canEditMessage && (
                                 <ActionBtn icon={<Edit3 className="w-3.5 h-3.5" />} title="Edit" onClick={() => { setIsEditing(true); setEditText(message.text); }} />
                             )}
                             {isOwn && (
@@ -527,6 +576,24 @@ export default function MessageBubble({ message, isOwn, otherUser, showAvatar, o
                 <ViewOnceMediaViewer mediaUrl={viewOnceViewer.mediaUrl} type={viewOnceViewer.type}
                     durationSeconds={viewOnceViewer.durationSeconds} onClose={() => setViewOnceViewer(null)} />
             )}
+            {showInfoModal && (
+                <PremiumModal
+                    title="Message Info"
+                    subtitle="See when this message was sent, edited, and read."
+                    onClose={() => {
+                        setShowInfoModal(false);
+                        setMessageInfo(null);
+                    }}
+                >
+                    {isLoadingMessageInfo ? (
+                        <div className="flex items-center justify-center py-10">
+                            <div className="w-6 h-6 border-2 border-primary-400/30 border-t-primary-400 rounded-full animate-spin" />
+                        </div>
+                    ) : (
+                        <MessageInfoCard message={message} messageInfo={messageInfo} />
+                    )}
+                </PremiumModal>
+            )}
 
             {/* Long-press / right-click context bottom sheet */}
             {showContextSheet && (
@@ -543,6 +610,8 @@ export default function MessageBubble({ message, isOwn, otherUser, showAvatar, o
                     onPin={() => togglePinMessage(message._id)}
                     onBookmark={() => setShowBookmarkModal(true)}
                     onRemind={() => setShowReminderModal(true)}
+                    onInfo={isOwn ? handleOpenInfo : null}
+                    canEdit={canEditMessage}
                     onEdit={() => { setIsEditing(true); setEditText(message.text); setShowContextSheet(false); }}
                     onDeleteMe={() => handleDelete('me')}
                     onDeleteAll={() => handleDelete('everyone')}
@@ -587,6 +656,104 @@ function EmptyState({ text }) {
     return (
         <div className="rounded-[18px] border border-dashed border-white/10 bg-white/3 px-4 py-5 text-center text-sm opacity-45">
             {text}
+        </div>
+    );
+}
+
+function MessageInfoCard({ message, messageInfo }) {
+    const safeInfo = messageInfo || {};
+    const readBy = Array.isArray(safeInfo.readBy) ? safeInfo.readBy : [];
+    const pendingReaders = Array.isArray(safeInfo.pendingReaders) ? safeInfo.pendingReaders : [];
+
+    return (
+        <div className="space-y-4">
+            <div className="rounded-[18px] border border-white/8 bg-white/4 px-4 py-3">
+                <p className="text-sm font-semibold mb-1">Message</p>
+                <p className="text-sm opacity-70 break-words whitespace-pre-wrap">
+                    {message?.text || getMessageSnippet(message)}
+                </p>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+                <InfoBlock label="Sent" value={formatFullDateTime(safeInfo.createdAt || message?.createdAt)} />
+                <InfoBlock
+                    label="Edit Window"
+                    value={safeInfo.canEdit && safeInfo.editableUntil
+                        ? `Until ${formatFullDateTime(safeInfo.editableUntil)}`
+                        : 'Ended'}
+                />
+                <InfoBlock
+                    label="Edited"
+                    value={safeInfo.isEdited
+                        ? formatFullDateTime(safeInfo.editedAt || safeInfo.updatedAt)
+                        : 'Not edited'}
+                />
+                <InfoBlock label="Status" value={safeInfo.status ? `${safeInfo.status}`.replace(/^./, (char) => char.toUpperCase()) : 'Sent'} />
+            </div>
+
+            <div className="rounded-[18px] border border-white/8 bg-white/4 p-4">
+                <div className="flex items-center justify-between gap-3 mb-3">
+                    <div>
+                        <p className="text-sm font-semibold">Read Receipts</p>
+                        <p className="text-xs opacity-45 mt-0.5">See who has read this message and when.</p>
+                    </div>
+                    <span className="badge-pill !bg-primary-500/15 !text-primary-200">
+                        {readBy.length} read
+                    </span>
+                </div>
+
+                {readBy.length > 0 ? (
+                    <div className="space-y-2">
+                        {readBy.map((entry) => {
+                            const person = entry.user || {};
+                            return (
+                                <div key={`${person._id || person.username || 'reader'}-${entry.seenAt || ''}`} className="flex items-center gap-3 rounded-2xl border border-white/8 bg-white/5 px-3 py-3">
+                                    <div className="w-10 h-10 rounded-full overflow-hidden ring-1 ring-white/10 flex-shrink-0">
+                                        {person.avatar ? (
+                                            <img src={person.avatar} alt={person.name} className="w-full h-full object-cover" />
+                                        ) : (
+                                            <AvatarFallback name={person.name} className="text-sm" />
+                                        )}
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                        <p className="text-sm font-semibold truncate">{person.name || 'Reader'}</p>
+                                        <p className="text-xs opacity-45 truncate">
+                                            {person.username ? `@${person.username}` : 'Read receipt'}
+                                        </p>
+                                    </div>
+                                    <p className="text-xs opacity-55 text-right flex-shrink-0">
+                                        {formatFullDateTime(entry.seenAt)}
+                                    </p>
+                                </div>
+                            );
+                        })}
+                    </div>
+                ) : (
+                    <EmptyState text="No one has read this message yet." />
+                )}
+            </div>
+
+            {pendingReaders.length > 0 && (
+                <div className="rounded-[18px] border border-white/8 bg-white/4 p-4">
+                    <p className="text-sm font-semibold mb-3">Still Waiting On</p>
+                    <div className="flex flex-wrap gap-2">
+                        {pendingReaders.map((person) => (
+                            <span key={person._id} className="badge-pill">
+                                {person.name || person.username || 'Member'}
+                            </span>
+                        ))}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
+function InfoBlock({ label, value }) {
+    return (
+        <div className="rounded-[18px] border border-white/8 bg-white/4 px-4 py-3">
+            <p className="text-[10px] uppercase tracking-widest opacity-38 mb-1.5">{label}</p>
+            <p className="text-sm font-medium opacity-80">{value}</p>
         </div>
     );
 }
