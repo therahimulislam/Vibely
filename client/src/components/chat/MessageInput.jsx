@@ -171,11 +171,7 @@ export default function MessageInput({
         recordingStreamRef.current?.getTracks?.().forEach((track) => track.stop());
     }, []);
 
-    useEffect(() => () => {
-        if (mediaPreview?.startsWith('blob:')) {
-            URL.revokeObjectURL(mediaPreview);
-        }
-    }, [mediaPreview]);
+    // Removed strict mode useEffect revocation bug. Blob URLs are now revoked when explicitly cleared.
 
     // Handle typing indicator
     const handleTyping = useCallback(() => {
@@ -205,6 +201,10 @@ export default function MessageInput({
             return;
         }
 
+        if (mediaPreview && mediaPreview.startsWith('blob:')) {
+            URL.revokeObjectURL(mediaPreview);
+        }
+
         if (isDocument) {
             setMedia(file);
             setMediaType('document');
@@ -220,10 +220,13 @@ export default function MessageInput({
                 setMediaType('video');
                 setMediaPreview(URL.createObjectURL(file));
             } else {
-                // Fallback for non-image/video in gallery mode (should generally be filtered out by accept, but safety)
+                // If the user selected from gallery (isDocument is false),
+                // fallback to image/video based on hints if possible, otherwise assume image.
+                // Mobile OS can sometimes strip the MIME type or extension.
                 setMedia(file);
-                setMediaType('document');
-                setMediaPreview(file.name);
+                const isVideoHint = file.type.includes('video') || /\.(mp4|mov|webm)$/i.test(file.name);
+                setMediaType(isVideoHint ? 'video' : 'image');
+                setMediaPreview(URL.createObjectURL(file));
             }
         }
         setShowAttach(false);
@@ -232,6 +235,9 @@ export default function MessageInput({
 
     const clearSelectedMedia = () => {
         setMedia(null);
+        if (mediaPreview && mediaPreview.startsWith('blob:')) {
+            URL.revokeObjectURL(mediaPreview);
+        }
         setMediaPreview(null);
         setMediaType('text');
         setViewOnceEnabled(false);

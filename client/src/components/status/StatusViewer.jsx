@@ -64,13 +64,13 @@ export default function StatusViewer({ group, isOwn, onClose }) {
                 />
 
                 {activeItem.type !== 'text' && (
-                    <div className="absolute inset-0">
+                    <div className="absolute inset-0 flex items-center justify-center">
                         {activeItem.type === 'video' ? (
-                            <video src={activeItem.mediaUrl} autoPlay controls className="w-full h-full object-cover" />
+                            <video src={activeItem.mediaUrl} autoPlay controls className="max-w-full max-h-full object-contain" />
                         ) : (
-                            <img src={activeItem.mediaUrl} alt="" className="w-full h-full object-cover" />
+                            <img src={activeItem.mediaUrl} alt="" className="max-w-full max-h-full object-contain" />
                         )}
-                        <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-black/60" />
+                        <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-black/60 pointer-events-none" />
                     </div>
                 )}
 
